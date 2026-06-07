@@ -1,0 +1,68 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## Project Overview
+
+**ScadBundler** is an AST-based OpenSCAD file bundler that combines multi-file OpenSCAD projects into a single file for upload to platforms like Thingiverse or MakerWorld. This is a C# .NET 10 CLI tool distributed as a NuGet global tool.
+
+The repository is currently in **Slice 0.5** — the documentation completeness phase. No implementation code exists yet. The goal is to make each slice's documentation precise enough for one-shot AI implementation before any code is written.
+
+## Build & Run Commands
+
+Once implemented (Slice 1+):
+
+```bash
+dotnet build
+dotnet test
+dotnet test --filter "FullyQualifiedName~LexerTests"   # run a single test class
+dotnet run --project src/ScadBundler -- bundle myproject.scad -o bundled.scad
+dotnet tool install --global ScadBundler                # end-user install
+```
+
+## Architecture
+
+ScadBundler follows a compiler pipeline — **no regex/text hacks in the core path**:
+
+```
+SourceLoader → Lexer → Parser → SemanticAnalyzer → Inliner → Emitter
+```
+
+1. **SourceLoader** — Recursively resolves `include`/`use` statements, handles search paths and cycle detection.
+2. **Lexer** — Hand-written token scanner with precise source locations. Zero-allocation paths where possible.
+3. **Parser** — Recursive descent with precedence climbing for expressions. Produces immutable AST records.
+4. **AST** — Rich typed record hierarchy, designed for the Visitor pattern. Immutable throughout.
+5. **SemanticAnalyzer** — Symbol table construction, scope resolution, collision detection between merged files.
+6. **Inliner/Transformer** — Flattens dependencies, deduplicates modules/functions, handles renaming on conflict. Content + signature hashing for dedup.
+7. **Emitter** — Pretty-printer with configurable indentation/line length/brace style. Must preserve Customizer `/* [ ... ] */` comments and license headers.
+
+## Non-Negotiable Constraints (from [docs/Constitution.md](docs/Constitution.md))
+
+- **No ANTLR4 or parser generators** in the main codebase — hand-written recursive descent only.
+- **No runtime interop** with OpenSCAD's C++ parser (test harnesses only, in a separate project).
+- **≥95% line coverage** — unit tests per parser rule, semantic pass, and emitter edge case. Integration tests validate against official OpenSCAD.
+- **C# 13+ on .NET 10.0** — use records, pattern matching; minimal dependencies.
+- **No warnings** — Roslyn analyzers + EditorConfig enforced.
+- Output must be **semantically equivalent** to input — correctness over cleverness.
+
+## Key Design Decisions
+
+- **`include` vs `use`**: `include` brings in all definitions AND executes top-level calls; `use` imports only modules/functions. The bundler must replicate this semantic distinction.
+- **Collision resolution**: Configurable strategies for module name conflicts across merged files (namespace prefixing by default).
+- **Customizer support**: Special handling for `/* [ Section ] */` comment blocks and `// [min:max:step]` parameter annotations.
+- **Web-ready**: Core library should be consumable via WASM/JSON API to power a future "ScadBundler Live" web companion.
+
+## Grammar References
+
+The grammar reference docs are in [docs/Grammar-References.md](docs/Grammar-References.md) and [docs/Parser-Planning.md](docs/Parser-Planning.md). Key references:
+- RapCAD `openscad.bnf` — clean BNF starting point
+- BelfrySCAD `openscad_parser` — comprehensive PEG grammar with real-world AST patterns
+- `tree-sitter-openscad` — modern grammar.js
+- [docs/reference/OpenScad/OpenSCAD_User_Manual.pdf](reference/OpenScad/OpenSCAD_User_Manual.pdf) — semantic specification
+
+## Development Approach
+
+- Incremental slices, each producing a testable milestone (see [docs/Development-Slices.md](docs/Development-Slices.md))
+- Test-Driven + Golden Master tests early (capture expected output for regression)
+- Conventional commits, PRs require passing tests
+- MIT licensed

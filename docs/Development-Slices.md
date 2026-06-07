@@ -8,12 +8,64 @@ Build **incrementally, test-driven**, with AI assistance. Grammar references wil
 - Heavy use of Grammar-References.md and Parser-Planning.md.
 - Test-Driven + Golden Masters early.
 
-## Slice 0: Preparation (Current)
+## Slice 0: Preparation ✓
 - Review grammar resources.
 - Finalize AST design.
 - Collect test corpus.
 
-## Slice 1: Project Setup & Lexer
-...
+## Slice 0.5: Documentation Completeness (Current)
 
-## Remaining slices as before...
+**Goal**: Every subsequent slice must be *one-shot AI ready* — a cold AI assistant can implement the slice and self-verify the milestone with no additional clarification.
+
+**Exit Criteria for Slice 0.5**:
+- [ ] Each slice has a precise, testable acceptance checklist (not vague goals).
+- [ ] AST node hierarchy is fully specified: record names, field names, field types, nullable/optional annotations.
+- [ ] Grammar coverage per slice is explicitly listed — which production rules are implemented in which slice.
+- [ ] Error/diagnostic catalog: every user-visible error has a code (e.g. `SB-001`), message template, and triggering condition.
+- [ ] Golden test cases: each slice has ≥3 input→expected-output (or input→expected-diagnostic) examples, covering the happy path and at least one error path.
+- [ ] All docs are internally consistent (no contradictions between Constitution, Spec, Design, UX, and slice plans).
+- [ ] Slice boundaries are unambiguous — no feature straddles two slices without a clear cut point.
+- [ ] `include` vs `use` semantics are precisely specified with examples in Spec.md.
+- [ ] Collision resolution strategies are fully specified with examples.
+
+**Deliverables**:
+- Updated/expanded versions of: `Spec.md`, `Design.md`, `Parser-Planning.md`, `Development-Slices.md`
+- New doc: `AST-Reference.md` — complete node hierarchy with field-level detail
+- New doc: `Diagnostics.md` — error/warning catalog with codes, messages, examples
+- New doc: `Test-Corpus.md` — golden test cases organized by slice
+
+## Slice 1: Project Setup & Lexer
+
+*(To be fleshed out in Slice 0.5)*
+
+**Rough scope**: .NET solution structure, project layout, EditorConfig/analyzer config, Lexer implementation with all token types, source location tracking, lexer unit tests.
+
+## Slice 2: Parser (Core Statements)
+
+*(To be fleshed out in Slice 0.5)*
+
+**Rough scope**: Recursive descent parser for top-level statements — module declarations, function declarations, variable assignments, `include`/`use` statements. Immutable AST record types.
+
+## Slice 3: Parser (Expressions & Full Grammar)
+
+*(To be fleshed out in Slice 0.5)*
+
+**Rough scope**: Pratt/precedence-climbing expression parser, remaining grammar rules, full round-trip parse-then-emit test.
+
+## Slice 4: Semantic Analysis & Symbol Table
+
+*(To be fleshed out in Slice 0.5)*
+
+**Rough scope**: Symbol table construction, scope resolution, collision detection across merged files.
+
+## Slice 5: Source Loader & Inliner
+
+*(To be fleshed out in Slice 0.5)*
+
+**Rough scope**: Recursive `include`/`use` resolution, cycle detection, dependency ordering, deduplication logic.
+
+## Slice 6: Emitter & CLI
+
+*(To be fleshed out in Slice 0.5)*
+
+**Rough scope**: Pretty-printer with Customizer comment preservation, license aggregation, CLI entry point, NuGet packaging.
