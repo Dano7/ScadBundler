@@ -32,7 +32,7 @@ Build **incrementally, test-driven**, with AI assistance. Grammar references wil
 - Updated/expanded versions of: `Spec.md`, `Design.md`, `Parser-Planning.md`, `Development-Slices.md`
 - New doc: `AST-Reference.md` — complete node hierarchy with field-level detail ✓ **(done)**
 - New doc: `Diagnostics.md` — error/warning catalog with codes, messages, examples ◐ **(seeded; expand per-slice)**
-- New doc: `Test-Corpus.md` — golden test cases organized by slice
+- New doc: `Test-Corpus.md` — golden test cases organized by slice ◐ **(seeded: conventions + one binding case per locked decision; expand per-slice)**
 
 ## Slice 1: Project Setup & Lexer
 
