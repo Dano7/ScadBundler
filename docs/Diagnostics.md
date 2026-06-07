@@ -55,7 +55,7 @@ A list-comprehension generator (`for` / `if` / `let` / `each` in their comprehen
 - **Message**: `'{name}' is deprecated in OpenSCAD; preserved unchanged. Consider migrating to its modern equivalent.`
 
 ## To Be Cataloged (later Slice 0.5 work)
-- `SB1xxx`: unterminated string/block comment, invalid number, unexpected character.
+- `SB1xxx`: unterminated string / block comment / `include`/`use` statement, unexpected character. Confirmed from OpenSCAD `lexer.l`: undefined escape sequence (Warning, drops backslash), integer literal "cannot be represented precisely" (Warning), and variable names starting with a digit (Deprecated).
 - `SB2xxx`: expected token, unbalanced brackets, malformed parameter/argument list, illegal modifier placement.
 - `SB3xxx`: duplicate definition in one scope, undefined symbol (where decidable), arity issues (if in scope).
 - `SB4xxx`: file not found on search path, include/use cycle, path escapes allowed roots.

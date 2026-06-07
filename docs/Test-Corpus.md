@@ -122,6 +122,19 @@ s = "abc
 SB1xxx ERROR 1:5 Unterminated string literal.
 ```
 
+**L-004 — hex literal** (lexer accepts `0x…`; value parsed to double, `RawText` preserved)
+```scad
+n = 0xFF;
+```
+```
+IDENT 1:1 n
+ASSIGN 1:3 =
+NUMBER 1:5 0xFF
+SEMI 1:9 ;
+EOF 2:1
+```
+> The resulting `NumberLiteral` has `Value=255, RawText="0xFF"`.
+
 ---
 
 ### Slice 2 — Parser: statements (`P-`)
@@ -167,7 +180,7 @@ AssignmentStatement { Name="b", Value=NumberLiteral 2, BlankLineBefore=true }
 
 ### Slice 3 — Parser: expressions (`E-`)
 
-> The authoritative precedence/associativity table is owned by [Parser-Planning.md](Parser-Planning.md); a full precedence battery is added here once it is locked. Seed cases use only uncontroversial rules.
+> The authoritative precedence/associativity table is owned by [Parser-Planning.md](Parser-Planning.md) (now locked, translated from OpenSCAD `parser.y`). E-001–E-003 cover basic precedence; E-004–E-008 pin the non-obvious gotchas.
 
 **E-001 — multiplicative binds tighter than additive**
 ```scad
@@ -195,6 +208,52 @@ v = a ? b : c ? d : e;
 ```
 ConditionalExpression { Condition=Identifier "a", Then=Identifier "b",
   Else = ConditionalExpression { Condition=Identifier "c", Then=Identifier "d", Else=Identifier "e" } }
+```
+
+**E-004 — `^` is right-associative** *(gotcha #2)* — `2 ^ 3 ^ 2` = `2^(3^2)` = 512
+```scad
+v = 2 ^ 3 ^ 2;
+```
+```
+BinaryExpression { Operator=Power, Left=NumberLiteral 2,
+  Right = BinaryExpression { Operator=Power, Left=NumberLiteral 3, Right=NumberLiteral 2 } }
+```
+
+**E-005 — `^` binds tighter than unary minus** *(gotcha #1)* — `-2 ^ 2` = `-(2^2)` = -4
+```scad
+v = -2 ^ 2;
+```
+```
+UnaryExpression { Operator=Negate,
+  Operand = BinaryExpression { Operator=Power, Left=NumberLiteral 2, Right=NumberLiteral 2 } }
+```
+
+**E-006 — `^`'s right operand may be unary** *(gotcha #3)*
+```scad
+v = 2 ^ -1;
+```
+```
+BinaryExpression { Operator=Power, Left=NumberLiteral 2,
+  Right = UnaryExpression { Operator=Negate, Operand=NumberLiteral 1 } }
+```
+
+**E-007 — unary stacks (right-associative)** *(gotcha #4)*
+```scad
+v = !!a;
+```
+```
+UnaryExpression { Operator=Not, Operand = UnaryExpression { Operator=Not, Operand=Identifier "a" } }
+```
+
+**E-008 — bitwise/shift precedence: `&` tighter than `|`, both looser than `+`** *(gotcha #6)*
+`a | b & c + d` → `+`(lvl 9) tighter than `&`(lvl 7) tighter than `|`(lvl 6) → `a | (b & (c + d))`
+```scad
+v = a | b & c + d;
+```
+```
+BinaryExpression { Operator=BitwiseOr, Left=Identifier "a",
+  Right = BinaryExpression { Operator=BitwiseAnd, Left=Identifier "b",
+    Right = BinaryExpression { Operator=Add, Left=Identifier "c", Right=Identifier "d" } } }
 ```
 
 ---
@@ -361,7 +420,8 @@ Each locked decision maps to at least one binding case and, where behavioral, an
 | comprehension only in vectors (AST §7, Diag SB3002) | S-002 | — |
 | modifier stacking as list (AST §5) | P-001 | — |
 | blank-line via `BlankLineBefore` (AST §15.7) | P-003 | — |
-| numbers are `double` + `RawText` (AST §15.9) | L-001, P-002 | — |
+| numbers are `double` + `RawText`, incl. hex (AST §15.9) | L-001, L-004, P-002 | — |
+| operator precedence/associativity (Parser-Planning, from `parser.y`) | E-001–E-008 | — |
 
 ---
 
@@ -371,7 +431,7 @@ Each locked decision maps to at least one binding case and, where behavioral, an
 - [x] One binding case per locked decision (§6)
 - [ ] Lexer: full token-kind battery, every escape, every numeric form, all error codes
 - [ ] Parser: one case per grammar production (tie to RapCAD BNF rules)
-- [ ] Expressions: full precedence/associativity battery (after Parser-Planning locks the table)
+- [x] Expressions: precedence/associativity **gotchas** pinned (E-004–E-008, from `parser.y`); exhaustive per-level battery still TODO
 - [ ] Semantic: duplicate-definition, undefined-symbol, arity cases
 - [ ] Bundle: cycle detection, search-path/`OPENSCADPATH`, dedup (identical module hashing), all `--on-collision` strategies, license aggregation
 - [ ] Emitter: brace style, line-length wrapping, `--minify`, license header block

@@ -367,16 +367,18 @@ public sealed record LetExpression(
 ) : Expression;
 
 /// `assert(Arguments) Body` — Body is the expression the assert guards.
-/// Arguments are (condition) or (condition, message).
+/// Arguments are (condition) or (condition, message). Body is OPTIONAL
+/// (OpenSCAD grammar `expr_or_empty`): `x = assert(c);` is legal → Body = null.
 public sealed record AssertExpression(
     IReadOnlyList<Argument> Arguments,
-    Expression Body
+    Expression? Body
 ) : Expression;
 
-/// `echo(Arguments) Body` — echoes then evaluates Body.
+/// `echo(Arguments) Body` — echoes then evaluates Body. Body is OPTIONAL
+/// (OpenSCAD grammar `expr_or_empty`) → Body may be null.
 public sealed record EchoExpression(
     IReadOnlyList<Argument> Arguments,
-    Expression Body
+    Expression? Body
 ) : Expression;
 
 /// Anonymous function literal: `function (Parameters) Body`.
@@ -399,6 +401,16 @@ public sealed record ForComprehension(
     Expression Body
 ) : Expression;
 
+/// C-style `for (Init; Condition; Update) Body` inside `[...]`
+/// (OpenSCAD grammar `LcForC`), e.g. `[for (i = 0; i < 10; i = i + 1) i]`.
+/// Rare but valid; Init/Update are binding lists, Condition is the loop test.
+public sealed record ForCComprehension(
+    IReadOnlyList<Binding> Init,
+    Expression Condition,
+    IReadOnlyList<Binding> Update,
+    Expression Body
+) : Expression;
+
 /// `if (Condition) Then` inside `[...]`, optionally `else Else`.
 /// Without Else it acts as a FILTER; with Else it selects between two yields.
 public sealed record IfComprehension(
@@ -417,7 +429,7 @@ public sealed record LetComprehension(
 public sealed record EachExpression(Expression Value) : Expression;
 ```
 
-> **Constraint**: `ForComprehension`, `IfComprehension`, `LetComprehension`, and `EachExpression` are syntactically valid only as direct or nested elements of a `VectorExpression`. The parser accepts them only in that position; the semantic analyzer emits a diagnostic if one appears elsewhere.
+> **Constraint**: `ForComprehension`, `ForCComprehension`, `IfComprehension`, `LetComprehension`, and `EachExpression` are syntactically valid only as direct or nested elements of a `VectorExpression`. The parser accepts them only in that position; the semantic analyzer emits a diagnostic (SB3002) if one appears elsewhere.
 
 ---
 
@@ -454,7 +466,7 @@ public enum InstantiationModifier
     Background   // %  — render transparent, excluded from geometry
 }
 
-public enum UnaryOperator { Negate, Plus, Not }    // -  +  !
+public enum UnaryOperator { Negate, Plus, Not, BitwiseNot }    // -  +  !  ~
 
 public enum BinaryOperator
 {
@@ -463,9 +475,13 @@ public enum BinaryOperator
     // comparison
     Less, LessEqual, Greater, GreaterEqual, Equal, NotEqual,  // <  <=  >  >=  ==  !=
     // logical
-    And, Or                                            // &&  ||
+    And, Or,                                           // &&  ||
+    // bitwise & shift (present in OpenSCAD parser.y)
+    BitwiseAnd, BitwiseOr, ShiftLeft, ShiftRight       // &  |  <<  >>
 }
 ```
+
+> Precedence and associativity for all operators are defined authoritatively in [Parser-Planning.md](Parser-Planning.md) (translated from OpenSCAD's `parser.y`). Notably `^` (Power) is **right-associative and binds tighter than unary minus**.
 
 ---
 
@@ -476,7 +492,7 @@ Several OpenSCAD keywords map to different nodes depending on syntactic context.
 | Keyword | Statement context | Expression context | Inside `[ ... ]` (comprehension) |
 |---|---|---|---|
 | `if`   | `IfStatement` | use ternary `?:` → `ConditionalExpression` | `IfComprehension` |
-| `for`  | `ForStatement` | — | `ForComprehension` |
+| `for`  | `ForStatement` | — | `ForComprehension`; C-style → `ForCComprehension` |
 | `intersection_for` | `IntersectionForStatement` | — | — |
 | `let`  | `LetStatement` | `LetExpression` | `LetComprehension` |
 | `each` | — | — | `EachExpression` |
@@ -529,13 +545,13 @@ Every concrete node, grouped. This list is exhaustive — it doubles as the set 
 
 **Statements (13):** `IncludeStatement`, `UseStatement`, `ModuleDefinition`, `FunctionDefinition`, `AssignmentStatement`, `ModuleInstantiation`, `BlockStatement`, `IfStatement`, `ForStatement`, `IntersectionForStatement`, `LetStatement`, `EmptyStatement`, `AssignStatement`
 
-**Expressions (20):** `NumberLiteral`, `StringLiteral`, `BooleanLiteral`, `UndefLiteral`, `Identifier`, `VectorExpression`, `RangeExpression`, `BinaryExpression`, `UnaryExpression`, `ConditionalExpression`, `ParenthesizedExpression`, `IndexExpression`, `MemberExpression`, `FunctionCallExpression`, `LetExpression`, `AssertExpression`, `EchoExpression`, `FunctionLiteral`, `ForComprehension`, `IfComprehension` *(plus `LetComprehension`, `EachExpression`)*
+**Expressions (23):** `NumberLiteral`, `StringLiteral`, `BooleanLiteral`, `UndefLiteral`, `Identifier`, `VectorExpression`, `RangeExpression`, `BinaryExpression`, `UnaryExpression`, `ConditionalExpression`, `ParenthesizedExpression`, `IndexExpression`, `MemberExpression`, `FunctionCallExpression`, `LetExpression`, `AssertExpression`, `EchoExpression`, `FunctionLiteral`, `ForComprehension`, `ForCComprehension`, `IfComprehension`, `LetComprehension`, `EachExpression`
 
 **Supporting (3):** `Parameter`, `Argument`, `Binding`
 
 **Trivia (1):** `CommentTrivia`
 
-> Total concrete node types: **40** (1 root + 13 statements + 22 expressions + 3 supporting + 1 trivia). The four comprehension generators are counted among expressions.
+> Total concrete node types: **41** (1 root + 13 statements + 23 expressions + 3 supporting + 1 trivia). The five comprehension generators (`ForComprehension`, `ForCComprehension`, `IfComprehension`, `LetComprehension`, `EachExpression`) are counted among expressions.
 
 ---
 
@@ -583,6 +599,7 @@ public interface IAstVisitor<out TResult>
     TResult Visit(EchoExpression node);
     TResult Visit(FunctionLiteral node);
     TResult Visit(ForComprehension node);
+    TResult Visit(ForCComprehension node);
     TResult Visit(IfComprehension node);
     TResult Visit(LetComprehension node);
     TResult Visit(EachExpression node);
@@ -764,7 +781,7 @@ These choices are fixed for cross-implementation consistency (one of the AI-comp
 6. **AST is parse-only; resolution lives in reference-keyed side tables.** Include resolution, symbol binding, and dedup decisions are pass outputs stored in `Dictionary<AstNode, T>(ReferenceEqualityComparer.Instance)` (or `ConditionalWeakTable`), never as fields on nodes. Records keep value equality for tests; side tables use *reference* identity, so structurally-identical, `with`-rewritten, or synthesized nodes never collide. Synthetic nodes carry their origin node's `SourceSpan` for diagnostics, or `SourceSpan.Synthetic` when there is no origin.
 7. **Comments are trivia; blank lines are a flag; the emitter owns the rest.** Comments (incl. Customizer/license) ride on `LeadingTrivia`/`TrailingTrivia`; a single `AstNode.BlankLineBefore` bool preserves intentional section breaks. All other formatting (indentation, brace style, wrapping) is regenerated by the emitter per its config — this is why we are a *bundler*, not a formatter. (Chosen over a `WhitespaceTrivia` node: leaner, and captures the only whitespace intent that matters.)
 8. **`Binding` vs `AssignmentStatement` are distinct types** despite identical shape, because they occupy different grammatical positions (let/for binding vs. statement) and visitors/analyzers treat them differently.
-9. **Numbers are `double`.** OpenSCAD has no integer type — every number is an IEEE-754 double — so `double` reproduces its exact arithmetic and precision limits. Emit fidelity (`1` vs `1.0` vs `1e3`) comes from `RawText`, not the numeric type.
+9. **Numbers are `double`.** OpenSCAD has no integer type — every number is an IEEE-754 double — so `double` reproduces its exact arithmetic and precision limits. The lexer accepts hex (`0xFF`), decimal, fraction (`.5`, `1.`), and scientific (`1e3`) forms; all parse to `double`, and very large values lose precision exactly as OpenSCAD warns. Emit fidelity (`1` vs `1.0` vs `1e3` vs `0xFF`) comes from `RawText`, not the numeric type.
 10. **Deprecated constructs are handled, not ignored ("No Half Measures").** Pure syntax/scope deprecations with exact modern equivalents are auto-normalized with a warning (`assign`→`let`; `child()`→`children(0)`; `child(n)`→`children(n)`). Deprecated *built-in calls* whose rewrite could alter geometry or file I/O (`import_stl`, `import_dxf`, `import_off`, `dxf_linear_extrude`, `dxf_rotate_extrude`) are preserved verbatim with an info diagnostic — the bundler combines, it does not refactor behavior. Full policy in [Spec.md](Spec.md); codes in [Diagnostics.md](Diagnostics.md).
 11. **Member access is validated, not enum-typed.** `MemberExpression.Member` stays `string` so the parser accepts any `.ident` and the semantic pass emits a precise, recoverable diagnostic (SB3001) for anything outside {x, y, z} — better UX than a hard parse failure.
 
