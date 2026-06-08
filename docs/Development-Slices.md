@@ -34,11 +34,11 @@ Build **incrementally, test-driven**, with AI assistance. Grammar references wil
 - New doc: `Diagnostics.md` — error/warning catalog with codes, messages, examples ◐ **(seeded; expand per-slice)**
 - New doc: `Test-Corpus.md` — golden test cases organized by slice ◐ **(seeded: conventions + one binding case per locked decision; expand per-slice)**
 
-## Slice 1: Project Setup & Lexer
+## Slice 1: Project Setup & Lexer ✓ **spec ready**
 
-*(To be fleshed out in Slice 0.5)*
+Full spec: **[slices/Slice-1-Lexer.md](slices/Slice-1-Lexer.md)**.
 
-**Rough scope**: .NET solution structure, project layout, EditorConfig/analyzer config, Lexer implementation with all token types, source location tracking, lexer unit tests.
+**Scope**: .NET 10 solution + Core/Tests projects + build/analyzer config; foundational text & trivia types; diagnostics plumbing; hand-written lexer (all token kinds, hex/escape decoding, comment trivia, `BlankLineBefore`, precise source spans) with diagnostics SB1001–SB1009. **Exit**: zero-warning build, green xUnit, corpus L-001..L-004 + token battery pass, ≥95% lexer coverage.
 
 ## Slice 2: Parser (Core Statements)
 

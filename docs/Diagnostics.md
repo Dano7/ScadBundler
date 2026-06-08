@@ -26,6 +26,21 @@ Every diagnostic carries a `SourceSpan` (file + line/column) and renders as:
 
 ## Catalog (seeded)
 
+### Lexer (SB1xxx)
+Full detail and recovery behavior in [slices/Slice-1-Lexer.md](slices/Slice-1-Lexer.md) §9. Every lexer diagnostic recovers (the lexer never throws).
+
+| Code | Sev | Trigger | Message |
+|---|---|---|---|
+| SB1001 | Error | unterminated string literal | `Unterminated string literal.` |
+| SB1002 | Error | unterminated block comment | `Unterminated block comment.` |
+| SB1003 | Error | unterminated `include`/`use` (`<` with no `>`) | `Unterminated include/use statement.` |
+| SB1004 | Error | unrecognized character | `Unexpected character '{ch}'.` |
+| SB1005 | Error | non-ASCII char outside string/comment | `Non-ASCII character outside string or comment.` |
+| SB1006 | Warning | unknown string escape `\?` | `Undefined escape sequence '\{ch}'; backslash ignored.` |
+| SB1007 | Warning | integer/hex literal too large for exact double | `Number '{text}' cannot be represented precisely.` |
+| SB1008 | Warning | identifier starting with a digit | `Variable names starting with a digit ('{text}') are deprecated.` |
+| SB1009 | Warning | newline inside an include/use path | `Newline in include/use path is not well-defined.` |
+
 ### SB3001 — Invalid vector member access *(Error, Semantic)*
 A `MemberExpression` uses a component outside `{x, y, z}`.
 - **Trigger**: `v.w`, `v.foo`, etc.
@@ -74,7 +89,6 @@ A list-comprehension generator (`for` / `if` / `let` / `each` in their comprehen
 - **Message**: `'{name}' is deprecated in OpenSCAD; preserved unchanged. Consider migrating to its modern equivalent.`
 
 ## To Be Cataloged (later Slice 0.5 work)
-- `SB1xxx`: unterminated string / block comment / `include`/`use` statement, unexpected character. Confirmed from OpenSCAD `lexer.l`: undefined escape sequence (Warning, drops backslash), integer literal "cannot be represented precisely" (Warning), and variable names starting with a digit (Deprecated).
 - `SB2xxx`: expected token, unbalanced brackets, malformed parameter/argument list, illegal modifier placement.
 - `SB3xxx`: undefined symbol (where decidable — conservative, see [Builtins-Reference.md](Builtins-Reference.md)), arity issues (if in scope). *(Duplicate definition/reassignment now seeded as SB3003/SB3004.)*
 - `SB4xxx`: path escapes allowed roots; ambiguous match across library paths. *(File-not-found and cycle now seeded as SB4001/SB4002.)*

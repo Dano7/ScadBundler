@@ -114,12 +114,12 @@ EOF 2:1
 ```
 > Comment text is attached as trivia, not emitted as a token.
 
-**L-003 (error) — unterminated string** → diagnostic (code in `SB1xxx` range, finalized Slice 1)
+**L-003 (error) — unterminated string** → SB1001
 ```scad
 s = "abc
 ```
 ```
-SB1xxx ERROR 1:5 Unterminated string literal.
+SB1001 ERROR 1:5 Unterminated string literal.
 ```
 
 **L-004 — hex literal** (lexer accepts `0x…`; value parsed to double, `RawText` preserved)
