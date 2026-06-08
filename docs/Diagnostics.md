@@ -1,6 +1,6 @@
 # ScadBundler Diagnostics Catalog
 
-**Status**: Seed. This file establishes the diagnostic **code scheme** and records the diagnostics introduced by resolved design decisions so far. It is **not yet complete** — the full per-slice catalog (every lexer/parser/semantic error) is a dedicated Slice 0.5 task. Add entries here as each slice is specified; never invent a code at implementation time without recording it here first.
+**Status**: Substantially complete. Establishes the `SBnnnn` **code scheme** and catalogs every diagnostic referenced by the slice specs (SB1xxx–SB6xxx). A few non-essential edge cases remain under "To Be Cataloged", to be added as the relevant slice is implemented. **Never invent a code at implementation time without recording it here first.**
 
 ## Code Scheme
 
@@ -73,7 +73,7 @@ A list-comprehension generator (`for` / `if` / `let` / `each` in their comprehen
 ### SB3004 — Definition redefined (last-wins) *(Warning, Semantic)*
 - **Trigger**: a module or function name is defined more than once in the same (merged) scope.
 - **Message**: `{module|function} '{name}' is redefined; the last definition wins.`
-- **Notes**: OpenSCAD is silent here (`LocalScope.cc` overwrites the lookup entry); we warn. Under `--on-collision rename`/`prefix` the definitions are instead kept and renamed — see Spec collision strategy.
+- **Notes**: OpenSCAD is silent here (`LocalScope.cc` overwrites the lookup entry); we warn. Under `--on-collision prefix` the definitions are instead kept and namespaced — see Spec collision strategy.
 
 ### SB3005 — Unknown reference *(Warning, Semantic)*
 - **Trigger**: a module/function/variable reference that resolves to nothing — not a built-in, special variable, local binding, or any reachable user declaration. Emitted **conservatively** (only when all files are loaded).
@@ -121,7 +121,7 @@ A list-comprehension generator (`for` / `if` / `let` / `each` in their comprehen
 - **Message**: `Internal: emitted output failed to re-parse.`
 - **Notes**: enabled in debug/tests as a correctness guard. See [slices/Slice-6-Emitter-CLI.md](slices/Slice-6-Emitter-CLI.md) §6.
 
-## To Be Cataloged (later Slice 0.5 work)
+## To Be Cataloged (add as the relevant slice is implemented)
 - `SB3xxx`: arity issues (if statically decidable). *(Duplicate/reassignment = SB3003/SB3004; unknown reference = SB3005.)*
 - `SB4xxx`: path escapes allowed roots; ambiguous match across library paths. *(File-not-found and cycle now seeded as SB4001/SB4002.)*
 - `SB6xxx`: emitter fidelity warnings (if any). *(Self-check failure seeded as SB6001.)*
