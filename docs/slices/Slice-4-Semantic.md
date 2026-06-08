@@ -124,7 +124,7 @@ Only **File-scope** declarations produce renameable `Symbol`s. Everything inner 
 ## 6. Symbol-table construction
 
 1. For each loaded file, walk its `ScadFile` once, building the scope tree (§4). Record file-scope `Modules`/`Functions`/`TopLevelVariables` in declaration order.
-2. **Within-scope duplicates** (per `LocalScope.cc`): a second declaration of a name in the same scope overwrites for lookup (last-wins). Emit **SB3003** for a repeated variable assignment; **SB3004** for a repeated module/function definition. (These are *within one scope*; cross-file duplicates that arise from include-merging are the inliner's concern.)
+2. **Within-scope duplicates** (per `LocalScope.cc`): a second declaration of a name in the same scope overwrites for lookup (last-wins). Emit **SB3003** for a repeated variable assignment; **SB3004** for a repeated module/function definition. (These are *within one scope*; cross-file duplicates that arise from include-merging are the inliner's concern.) **Scope of detection:** these fire at **file scope** — the scope that drives cross-file bundling collisions. Repeated names inside a module body/block are local-only (the inliner never renames or merges locals), and OpenSCAD's block-scope boundary for hoisted assignments is ambiguous enough that flagging them risks false positives, so within-nested-scope duplicate *warnings* are deferred by design.
 3. Index built-in names and special variables from [Builtins-Reference.md](../Builtins-Reference.md) for recognition (treat unknown names as user/library symbols — the version-robustness rule).
 
 ## 7. `PrivateConstants(usedFile)` — transitive reachability
