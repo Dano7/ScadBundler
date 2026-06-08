@@ -13,7 +13,7 @@ Build **incrementally, test-driven**, with AI assistance. Grammar references wil
 - Finalize AST design.
 - Collect test corpus.
 
-## Slice 0.5: Documentation Completeness (Current)
+## Slice 0.5: Documentation Completeness ✓ (Complete)
 
 **Goal**: Every subsequent slice must be *one-shot AI ready* — a cold AI assistant can implement the slice and self-verify the milestone with no additional clarification.
 

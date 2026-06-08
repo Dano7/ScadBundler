@@ -40,7 +40,7 @@ tests/
     V1-child/  V2-use-consts/  V3-assign-let/
 ```
 
-- `options.txt` (bundle cases): the CLI args after `bundle main.scad`, one token per line (e.g. `--on-collision`, `rename`). Empty/absent = defaults.
+- `options.txt` (bundle cases): the CLI args after `bundle main.scad`, one token per line (e.g. `--on-collision`, `prefix`). Empty/absent = defaults.
 - Missing `expected.diag` = "no diagnostics expected".
 - The runner normalizes line endings (`\r\n`→`\n`) and trailing newline before comparing.
 
@@ -450,7 +450,7 @@ Companion positive: `ok = [each [1, 2, 3]];` → no diagnostics.
   include <b.scad>
   part();
   ```
-- **Assertions** (default for `include` preserves OpenSCAD semantics = last-wins): `part()` resolves to the **later** definition (b → `sphere`); the earlier is dropped; an SB3004 warning is emitted. (With `--on-collision rename`, both are kept and renamed instead, as in B-006.)
+- **Assertions** (default for `include` preserves OpenSCAD semantics = last-wins): `part()` resolves to the **later** definition (b → `sphere`); the earlier is dropped; an SB3004 warning is emitted. (With `--on-collision prefix`, both are kept and namespaced instead, as in B-006.)
 - **Reference output**
   ```scad
   module part() sphere(1);
