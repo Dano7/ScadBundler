@@ -136,6 +136,10 @@ public sealed class SemanticAnalyzer
     // Pass 1 — declaration tables (§6) + duplicate detection (SB3003/SB3004)
     // ---------------------------------------------------------------------------------------------
 
+    // Duplicate detection (SB3003/SB3004) runs at FILE scope — the scope that drives cross-file
+    // bundling collisions. Repeated names inside a module body / block are local-only (the inliner
+    // never renames or merges locals) and OpenSCAD's exact block-scope boundary for hoisted
+    // assignments is ambiguous, so flagging them risks false positives; deferred by design (§6).
     private FileScope BuildFileScope(LoadedFile file)
     {
         var scope = new FileScope();
