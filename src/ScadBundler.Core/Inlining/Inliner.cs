@@ -12,7 +12,9 @@ namespace ScadBundler.Core.Inlining;
 /// pre-inline <see cref="ISemanticModel"/> for reference/symbol facts. Six phases (Spec §6): inline
 /// <c>include</c> (document order), import <c>use</c>d definitions + their private constants, resolve
 /// collisions (last-wins / namespace), deduplicate structurally-identical defs, normalize deprecated
-/// constructs, and assemble. Never throws — every problem is a diagnostic.
+/// constructs, and assemble. Assembly hoists the root file's Customizer parameter prologue to the top
+/// (verbatim, never renamed) and fences everything else behind a synthesized <c>/* [Hidden] */</c>, so
+/// OpenSCAD's Customizer still shows the model's parameters. Never throws — every problem is a diagnostic.
 /// </summary>
 public static class Inliner
 {
@@ -48,6 +50,10 @@ public static class Inliner
         public required string Name { get; init; }
 
         public required bool FromUse { get; init; }
+
+        // A root Customizer-parameter prologue assignment: emitted verbatim at the top and never
+        // renamed/namespaced/dropped, so the end user still sees it in the Customizer.
+        public bool Protected { get; init; }
     }
 
     private sealed class Run
@@ -73,6 +79,10 @@ public static class Inliner
         {
             LoadedFile root = _graph.Root;
 
+            // Phase A0 — the root's Customizer parameter prologue (hoisted to the top; never renamed).
+            var prologueNodes = new HashSet<AstNode>(ReferenceEqualityComparer.Instance);
+            List<AssignmentStatement> prologue = ExtractPrologue(root, prologueNodes);
+
             // Phase A — inline includes (document order); hoist use/font edges out of the flat list.
             (List<LoadedFile> usedFiles, List<UseStatement> fontUses) = DiscoverUses(root);
             List<Statement> rootFlat = FlattenIncludes(root, []);
@@ -81,15 +91,45 @@ public static class Inliner
             List<Candidate> useItems = GatherUseImports(usedFiles);
 
             // Phases C/D — collisions + dedup over the merged definition/variable set.
-            List<Candidate> rootDefs = RootDefinitions(rootFlat);
+            List<Candidate> rootDefs = RootDefinitions(rootFlat, prologueNodes);
             ResolveCollisions(useItems, rootDefs);
 
             // Phases E/F — assemble + single rewrite pass (renames + normalization).
             var rewriter = new BundleRewriter(_renames, _diagnostics);
-            ScadFile bundled = Assemble(root, fontUses, useItems, rootFlat, rewriter);
+            ScadFile bundled = Assemble(root, fontUses, useItems, rootFlat, prologue, prologueNodes, rewriter);
 
             IReadOnlyList<Diagnostic> sorted = Sort(_diagnostics.ToList());
             return (bundled, sorted);
+        }
+
+        // The root file's leading run of top-level assignments — the model's Customizer parameters.
+        // OpenSCAD only shows literal top-level assignments that precede the first '{' and physically
+        // belong to the root file (CommentParser::collectParameters + getLineToStop). Bundling splices
+        // included libraries above the root's own assignments, pushing the real parameters past that
+        // cutoff; hoisting this prologue back to the top (and fencing the rest with '/* [Hidden] */' in
+        // Assemble) restores them. Leading include/use/empty statements are skipped; the run ends at the
+        // first definition, instantiation, or control-flow/block statement.
+        private static List<AssignmentStatement> ExtractPrologue(LoadedFile root, HashSet<AstNode> nodes)
+        {
+            var prologue = new List<AssignmentStatement>();
+            foreach (Statement statement in root.Ast.Statements)
+            {
+                if (statement is AssignmentStatement assignment)
+                {
+                    prologue.Add(assignment);
+                    nodes.Add(assignment);
+                    continue;
+                }
+
+                if (statement is IncludeStatement or UseStatement or EmptyStatement)
+                {
+                    continue; // inert here: includes/uses are flattened/imported by later phases
+                }
+
+                break; // first definition/instantiation/control-flow ends the parameter block
+            }
+
+            return prologue;
         }
 
         // ---------------------------------------------------------------------------------------------
@@ -214,7 +254,7 @@ public static class Inliner
             return items;
         }
 
-        private static List<Candidate> RootDefinitions(List<Statement> rootFlat)
+        private static List<Candidate> RootDefinitions(List<Statement> rootFlat, HashSet<AstNode> prologueNodes)
         {
             var result = new List<Candidate>();
             foreach (Statement statement in rootFlat)
@@ -228,7 +268,14 @@ public static class Inliner
                         result.Add(new Candidate { Node = function, Kind = DefKind.Function, Name = function.Name, FromUse = false });
                         break;
                     case AssignmentStatement assignment:
-                        result.Add(new Candidate { Node = assignment, Kind = DefKind.Variable, Name = assignment.Name, FromUse = false });
+                        result.Add(new Candidate
+                        {
+                            Node = assignment,
+                            Kind = DefKind.Variable,
+                            Name = assignment.Name,
+                            FromUse = false,
+                            Protected = prologueNodes.Contains(assignment),
+                        });
                         break;
                 }
             }
@@ -267,6 +314,26 @@ public static class Inliner
                 foreach (Candidate rep in reps)
                 {
                     _winners.Add(rep.Node);
+                }
+
+                return;
+            }
+
+            // A root Customizer parameter must survive verbatim (the end user reads it). When one
+            // collides, protect it and resolve the collision by namespacing every other definition of
+            // the name — regardless of the configured strategy.
+            if (reps.Exists(r => r.Protected))
+            {
+                foreach (Candidate rep in reps)
+                {
+                    if (rep.Protected)
+                    {
+                        _winners.Add(rep.Node);
+                    }
+                    else
+                    {
+                        NamespaceRep(rep);
+                    }
                 }
 
                 return;
@@ -465,6 +532,8 @@ public static class Inliner
             List<UseStatement> fontUses,
             List<Candidate> useItems,
             List<Statement> rootFlat,
+            List<AssignmentStatement> prologue,
+            HashSet<AstNode> prologueNodes,
             BundleRewriter rewriter)
         {
             if (_errorCollision)
@@ -472,24 +541,41 @@ public static class Inliner
                 return new ScadFile(root.Source, []); // `Error` strategy: a collision means no output
             }
 
-            var statements = new List<Statement>();
             var emitted = new HashSet<AstNode>(ReferenceEqualityComparer.Instance);
 
+            // The Customizer parameter prologue leads, verbatim (never renamed, so its names stay
+            // user-facing). It is exempt from collision/dedup dropping — it is always emitted here.
+            var statements = new List<Statement>();
+            foreach (AssignmentStatement parameter in prologue)
+            {
+                if (emitted.Add(parameter))
+                {
+                    statements.Add(rewriter.RewriteStatement(parameter));
+                }
+            }
+
+            // Everything else: fonts, then use-imports, then the include-flattened body.
+            var rest = new List<Statement>();
             foreach (UseStatement font in fontUses)
             {
-                statements.Add(font); // a binary font cannot be inlined — preserved verbatim
+                rest.Add(font); // a binary font cannot be inlined — preserved verbatim
             }
 
             foreach (Candidate item in useItems)
             {
                 if (_winners.Contains(item.Node) && emitted.Add(item.Node))
                 {
-                    statements.Add(rewriter.RewriteStatement(item.Node));
+                    rest.Add(rewriter.RewriteStatement(item.Node));
                 }
             }
 
             foreach (Statement statement in rootFlat)
             {
+                if (prologueNodes.Contains(statement))
+                {
+                    continue; // hoisted into the prologue above
+                }
+
                 if (statement is ModuleDefinition or FunctionDefinition or AssignmentStatement)
                 {
                     if (!_winners.Contains(statement) || !emitted.Add(statement))
@@ -498,10 +584,30 @@ public static class Inliner
                     }
                 }
 
-                statements.Add(rewriter.RewriteStatement(statement));
+                rest.Add(rewriter.RewriteStatement(statement));
             }
 
+            // Fence the remaining top-level assignments out of the Customizer with a synthesized
+            // `/* [Hidden] */` boundary, so only the root's parameters surface (OpenSCAD's Hidden group).
+            // Only needed when a body assignment could otherwise be picked up as a parameter.
+            if (rest.Exists(s => s is AssignmentStatement))
+            {
+                rest[0] = WithHiddenFence(rest[0]);
+            }
+
+            statements.AddRange(rest);
             return new ScadFile(root.Source, statements);
+        }
+
+        // Prepends a synthesized `/* [Hidden] */` Customizer boundary to a statement's leading trivia.
+        // Modeled as trivia (not a node) so it round-trips the emitter self-check (a comment re-parses
+        // to a comment). Dropped under `--minify`/`--no-preserve-comments`, like all comments.
+        private static Statement WithHiddenFence(Statement statement)
+        {
+            var fence = new CommentTrivia("/* [Hidden] */", CommentKind.Block) { Span = SourceSpan.Synthetic };
+            var leading = new List<Trivia>(statement.LeadingTrivia.Count + 1) { fence };
+            leading.AddRange(statement.LeadingTrivia);
+            return statement with { LeadingTrivia = leading, BlankLineBefore = true };
         }
 
         // ---------------------------------------------------------------------------------------------

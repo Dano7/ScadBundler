@@ -300,6 +300,64 @@ public sealed class Slice5BundleTests
     }
 
     [Fact]
+    public void CustomizerParameters_HoistedAboveIncludedLibrary_AndFencedWithHidden()
+    {
+        // The included library (with its own global) is spliced above the root's params in document
+        // order; the inliner must hoist the root's parameter prologue back to the top so OpenSCAD's
+        // Customizer still sees it, and fence the library globals out with a synthesized /* [Hidden] */.
+        var (bundled, _) = BundleHelper.Bundle(
+            null,
+            ("main.scad", "include <lib.scad>\nwidth = 10;\nheight = 20;\npart();"),
+            ("lib.scad", "LIBCONST = 5;\nmodule part() cube(LIBCONST);"));
+
+        // The root parameters lead the bundle, in their original order.
+        Assert.Collection(
+            bundled.Statements.OfType<AssignmentStatement>().Take(2),
+            a => Assert.Equal("width", a.Name),
+            a => Assert.Equal("height", a.Name));
+
+        // …ahead of the library's own global.
+        List<string> names = [.. BundleHelper.TopLevelDeclarationNames(bundled)];
+        Assert.True(names.IndexOf("width") < names.IndexOf("LIBCONST"));
+        Assert.True(names.IndexOf("height") < names.IndexOf("LIBCONST"));
+
+        // A synthesized Hidden boundary fences whatever follows the parameters.
+        Assert.Contains(
+            bundled.Statements,
+            s => s.LeadingTrivia.Any(t => t is CommentTrivia { Text: "/* [Hidden] */" }));
+    }
+
+    [Fact]
+    public void EmptyPrologue_LibraryGlobals_AreStillFencedFromCustomizer()
+    {
+        // The root declares no parameters of its own, so the library globals must be fenced at the top
+        // (the original root would show zero Customizer parameters).
+        var (bundled, _) = BundleHelper.Bundle(
+            null,
+            ("main.scad", "include <lib.scad>\npart();"),
+            ("lib.scad", "LIBCONST = 5;\nmodule part() cube(LIBCONST);"));
+
+        Statement first = bundled.Statements[0];
+        Assert.True(first is AssignmentStatement { Name: "LIBCONST" });
+        Assert.Contains(first.LeadingTrivia, t => t is CommentTrivia { Text: "/* [Hidden] */" });
+    }
+
+    [Fact]
+    public void RootParameters_PreserveAuthorCustomizerComments()
+    {
+        var (bundled, _) = BundleHelper.Bundle(
+            null,
+            ("main.scad", "include <lib.scad>\n/* [Sizes] */\nwidth = 10;\n/* [Hidden] */\nsecret = 1;\npart();"),
+            ("lib.scad", "module part() cube(1);"));
+
+        var width = bundled.Statements.OfType<AssignmentStatement>().Single(a => a.Name == "width");
+        Assert.Contains(width.LeadingTrivia, t => t is CommentTrivia { Text: "/* [Sizes] */" });
+
+        var secret = bundled.Statements.OfType<AssignmentStatement>().Single(a => a.Name == "secret");
+        Assert.Contains(secret.LeadingTrivia, t => t is CommentTrivia { Text: "/* [Hidden] */" });
+    }
+
+    [Fact]
     public void UsedLibrary_InternalReference_FollowsRenamedPrivateConstant()
     {
         // Root and the used library both define WALL; the library's private constant is namespaced and
