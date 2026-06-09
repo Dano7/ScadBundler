@@ -27,7 +27,9 @@ public sealed class CliTests
 
         Assert.Equal(0, exit);
         Assert.Equal(string.Empty, stderr);
-        Assert.Equal("WALL = 2;\nmodule box() cube(WALL);\ncube(99);\nbox();\n", stdout);
+        // main.scad declares no Customizer parameters of its own, so the library's globals are fenced
+        // out of the Customizer with a synthesized `/* [Hidden] */` boundary at the top.
+        Assert.Equal("/* [Hidden] */\nWALL = 2;\nmodule box() cube(WALL);\ncube(99);\nbox();\n", stdout);
     }
 
     [Fact]
