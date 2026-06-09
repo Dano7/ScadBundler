@@ -58,7 +58,7 @@ internal static class BundleCommand
         }
 
         var bundleOptions = new BundleOptions(
-            [.. options.LibraryPaths, .. OpenScadPathEntries()],
+            [.. options.LibraryPaths, .. OpenScadEnvironment.LibraryPaths()],
             options.OnCollision,
             options.BundleLicenses,
             options.PreserveComments);
@@ -326,14 +326,6 @@ internal static class BundleCommand
         string directory = Path.GetDirectoryName(input) ?? string.Empty;
         string stem = Path.GetFileNameWithoutExtension(input);
         return Path.Combine(directory, stem + ".bundled.scad");
-    }
-
-    private static string[] OpenScadPathEntries()
-    {
-        string? value = Environment.GetEnvironmentVariable("OPENSCADPATH");
-        return string.IsNullOrEmpty(value)
-            ? []
-            : value.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
     }
 
     // A compact line-based unified diff (LCS); used by --diff to preview the bundle against its root.
