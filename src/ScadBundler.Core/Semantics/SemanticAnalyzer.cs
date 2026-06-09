@@ -289,6 +289,12 @@ public sealed class SemanticAnalyzer
     {
         PushFrame();
         ResolveBindings(bindings);
+
+        // A `for`/`let`/`intersection_for` body is its own scope, so its block-level assignments are
+        // visible scope-wide within it (OpenSCAD assignments are not sequential) — collect them as
+        // locals exactly like a module body, otherwise references such as the `odd_row` defined and
+        // used inside a `for` body fall through to a spurious SB3005.
+        CollectBodyLocals(body, _scopeChain[^1]);
         ResolveStatement(body);
         PopFrame();
     }
@@ -890,8 +896,9 @@ public sealed class SemanticAnalyzer
     // Scope-local collection
     // ---------------------------------------------------------------------------------------------
 
-    /// <summary>Collects the names a module body binds in its own scope: direct variable assignments,
-    /// nested definitions, and those reached through plain blocks, <c>if</c> branches, and geometry
+    /// <summary>Collects the names a body binds in its own scope — a module body or a
+    /// <c>for</c>/<c>let</c>/<c>intersection_for</c> body: direct variable assignments, nested
+    /// definitions, and those reached through plain blocks, <c>if</c> branches, and geometry
     /// children — but NOT through nested scopes (<c>for</c>/<c>let</c>/defs), which own their bindings.</summary>
     private static void CollectBodyLocals(Statement body, LocalFrame frame)
     {

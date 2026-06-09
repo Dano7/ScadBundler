@@ -60,6 +60,19 @@ public sealed class SemanticResolutionTests
     }
 
     [Fact]
+    public void BlockLocalAssignmentInForBody_ResolvesToNull()
+    {
+        // A block-level assignment inside a for/let body is a scope-wide local (OpenSCAD assignments
+        // are not sequential), so a read of it binds to no renameable symbol — like a for/let binding —
+        // and never produces SB3005.
+        var (ast, result) = SemanticHelper.AnalyzeFile("for (row = [0:2]) {\n  odd = row % 2;\n  x = odd;\n}");
+        var read = SemanticHelper.Find<Identifier>(ast, n => n.Name == "odd");
+
+        Assert.Null(result.Model.Resolve(read));
+        Assert.DoesNotContain(result.Diagnostics, d => d.Code == "SB3005");
+    }
+
+    [Fact]
     public void LetBindingValue_SeesOuterScope_NotItsOwnBinding()
     {
         // In `let (n = n) …` the binding's RHS is the OUTER n (sequential binding), so it must bind to

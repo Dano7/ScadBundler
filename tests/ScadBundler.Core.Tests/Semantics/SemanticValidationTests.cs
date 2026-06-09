@@ -169,6 +169,47 @@ public sealed class SemanticValidationTests
         Assert.Equal("Unknown variable 'missing'.", Assert.Single(result.Diagnostics, d => d.Code == DiagnosticCode.UnknownReference).Message);
     }
 
+    [Fact]
+    public void BlockLocalAssignment_ReferencedInSameControlFlowBody_NoUnknown()
+    {
+        // A for/let/intersection_for body's block-level assignments (odd_row/columns_this_row/
+        // row_offset) are scope-wide locals visible throughout the body — referencing them must not
+        // raise SB3005. Regression for the real-world CleatArray.scad / HexContainerLib.scad cleat loops.
+        SemanticResult result = SemanticHelper.Analyze(
+            """
+            module cleats(rows) {
+                for (row = [0:rows]) {
+                    odd_row = row % 2;
+                    columns_this_row = [3, 2][odd_row];
+                    row_offset = odd_row * 5;
+                    if (columns_this_row > 0)
+                        translate([row_offset, 0, 0]) cube(columns_this_row);
+                }
+            }
+            cleats(4);
+            """);
+        Assert.DoesNotContain(result.Diagnostics, d => d.Code == DiagnosticCode.UnknownReference);
+    }
+
+    [Fact]
+    public void BlockLocalAssignment_DoesNotMaskGenuinelyUnknownName()
+    {
+        // Recognizing block-local assignments must not swallow genuine unknowns: a call to an undeclared
+        // module in the same body still raises SB3005, while the block-local it reads does not.
+        SemanticResult result = SemanticHelper.Analyze(
+            """
+            module m() {
+                for (row = [0:2]) {
+                    odd_row = row % 2;
+                    stroke(odd_row);
+                }
+            }
+            m();
+            """);
+        Diagnostic diagnostic = Assert.Single(result.Diagnostics, d => d.Code == DiagnosticCode.UnknownReference);
+        Assert.Equal("Unknown module 'stroke'.", diagnostic.Message);
+    }
+
     [Theory]
     [InlineData("cube(5);")]            // built-in module
     [InlineData("x = sin(30);")]        // built-in function
