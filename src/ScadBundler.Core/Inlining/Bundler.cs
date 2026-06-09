@@ -22,7 +22,7 @@ public static class Bundler
         ArgumentNullException.ThrowIfNull(options);
         BundleOptions effective = options with
         {
-            LibraryPaths = [.. options.LibraryPaths, .. OpenScadPathEntries()],
+            LibraryPaths = [.. options.LibraryPaths, .. OpenScadEnvironment.LibraryPaths()],
         };
         return Bundle(rootPath, effective, DiskFileSystem.Instance);
     }
@@ -55,17 +55,5 @@ public static class Bundler
         ];
 
         return new BundleResult(bundled, all);
-    }
-
-    private static string[] OpenScadPathEntries()
-    {
-        string? value = Environment.GetEnvironmentVariable("OPENSCADPATH");
-        if (string.IsNullOrEmpty(value))
-        {
-            return [];
-        }
-
-        return value
-            .Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
     }
 }
