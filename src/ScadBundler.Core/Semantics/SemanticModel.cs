@@ -6,8 +6,8 @@ namespace ScadBundler.Core.Semantics;
 /// <summary>
 /// The concrete <see cref="ISemanticModel"/>: immutable lookup tables produced by
 /// <see cref="SemanticAnalyzer"/>. Declaration lists are per-file in source order; the resolution and
-/// references-to side tables use reference identity; <see cref="PrivateConstants"/> is computed on
-/// demand from the recorded own-file reference edges.
+/// references-to side tables use reference identity; <see cref="PrivateConstants(SourceFile)"/> is
+/// computed on demand from the recorded file-context reference edges.
 /// </summary>
 internal sealed class SemanticModel : ISemanticModel
 {
@@ -15,20 +15,21 @@ internal sealed class SemanticModel : ISemanticModel
     private readonly IReadOnlyDictionary<AstNode, Symbol> _resolution;
     private readonly IReadOnlyDictionary<AstNode, IReadOnlyList<AstNode>> _referencesTo;
 
-    /// <summary>For each declaration node, the own-file symbols its body references (the edges that
-    /// drive <see cref="PrivateConstants"/> reachability). Keyed by reference identity.</summary>
-    private readonly IReadOnlyDictionary<AstNode, IReadOnlyList<Symbol>> _ownFileReferences;
+    /// <summary>For each declaration node, the file-context symbols its body references (own file +
+    /// its include closure — the edges that drive <see cref="PrivateConstants(SourceFile)"/>
+    /// reachability). Keyed by reference identity.</summary>
+    private readonly IReadOnlyDictionary<AstNode, IReadOnlyList<Symbol>> _fileContextReferences;
 
     public SemanticModel(
         IReadOnlyDictionary<SourceFile, FileDeclarations> files,
         IReadOnlyDictionary<AstNode, Symbol> resolution,
         IReadOnlyDictionary<AstNode, IReadOnlyList<AstNode>> referencesTo,
-        IReadOnlyDictionary<AstNode, IReadOnlyList<Symbol>> ownFileReferences)
+        IReadOnlyDictionary<AstNode, IReadOnlyList<Symbol>> fileContextReferences)
     {
         _files = files;
         _resolution = resolution;
         _referencesTo = referencesTo;
-        _ownFileReferences = ownFileReferences;
+        _fileContextReferences = fileContextReferences;
     }
 
     /// <inheritdoc/>
@@ -61,24 +62,36 @@ internal sealed class SemanticModel : ISemanticModel
     public IReadOnlyList<AssignmentStatement> PrivateConstants(SourceFile usedFile)
     {
         ArgumentNullException.ThrowIfNull(usedFile);
-        if (!_files.TryGetValue(usedFile, out FileDeclarations? declarations))
-        {
-            return [];
-        }
+        return PrivateConstants([usedFile]);
+    }
 
-        // Reachability closure: start from the file's exported callables, follow own-file reference
-        // edges through modules/functions/constants, and collect every reachable top-level constant.
-        var reached = new HashSet<AssignmentStatement>();
+    /// <inheritdoc/>
+    public IReadOnlyList<AssignmentStatement> PrivateConstants(IReadOnlyList<SourceFile> mergedFiles)
+    {
+        ArgumentNullException.ThrowIfNull(mergedFiles);
+
+        // Reachability closure: start from the exported callables of every file in the merge, follow
+        // file-context reference edges through modules/functions/constants, and collect every
+        // reachable top-level constant — wherever in the merge it is declared.
+        var reached = new HashSet<AssignmentStatement>(ReferenceEqualityComparer.Instance);
         var visited = new HashSet<AstNode>(ReferenceEqualityComparer.Instance);
         var queue = new Queue<AstNode>();
-        foreach (ModuleDefinition module in declarations.Modules)
+        foreach (SourceFile file in mergedFiles)
         {
-            queue.Enqueue(module);
-        }
+            if (!_files.TryGetValue(file, out FileDeclarations? declarations))
+            {
+                continue;
+            }
 
-        foreach (FunctionDefinition function in declarations.Functions)
-        {
-            queue.Enqueue(function);
+            foreach (ModuleDefinition module in declarations.Modules)
+            {
+                queue.Enqueue(module);
+            }
+
+            foreach (FunctionDefinition function in declarations.Functions)
+            {
+                queue.Enqueue(function);
+            }
         }
 
         while (queue.Count > 0)
@@ -89,7 +102,7 @@ internal sealed class SemanticModel : ISemanticModel
                 continue;
             }
 
-            foreach (Symbol referenced in _ownFileReferences.GetValueOrDefault(declaration, []))
+            foreach (Symbol referenced in _fileContextReferences.GetValueOrDefault(declaration, []))
             {
                 if (referenced.Kind == SymbolKind.Variable)
                 {
@@ -101,9 +114,18 @@ internal sealed class SemanticModel : ISemanticModel
             }
         }
 
-        // Return in declaration order, excluding geometry, unreferenced vars, and $-var settings
-        // (those are simply never reached).
-        return [.. declarations.Variables.Where(reached.Contains)];
+        // Return grouped by file, in declaration order; geometry, unreferenced vars, $-var settings,
+        // and body locals are simply never in a file's top-level Variables list or never reached.
+        List<AssignmentStatement> result = [];
+        foreach (SourceFile file in mergedFiles)
+        {
+            if (_files.TryGetValue(file, out FileDeclarations? declarations))
+            {
+                result.AddRange(declarations.Variables.Where(reached.Contains));
+            }
+        }
+
+        return result;
     }
 }
 

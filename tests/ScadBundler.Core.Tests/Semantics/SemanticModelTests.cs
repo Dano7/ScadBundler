@@ -102,4 +102,25 @@ public sealed class SemanticModelTests
 
         Assert.Empty(result.Model.PrivateConstants(ast.Source));
     }
+
+    [Fact]
+    public void PrivateConstants_MergedClosure_ReachesConstantsDeclaredInIncludedFiles()
+    {
+        // The modulecache-tests `includefrommodule` shape: a used file's module reads a constant the
+        // file pulls in via `include` (ScopeContext.cc include-merge).
+        var (graph, result) = SemanticHelper.AnalyzeGraph(
+            ("lib.scad", "include <consts.scad>\nmodule m() cylinder(r = K);"),
+            ("consts.scad", "K = 5;\nUNUSED = 1;"));
+
+        SourceFile lib = graph.Root.Source;
+        SourceFile consts = graph.Root.Includes[0].Target!.Source;
+
+        // Per-file queries cannot see across the include boundary (lib declares no variables;
+        // consts exports no callables)…
+        Assert.Empty(result.Model.PrivateConstants(lib));
+        Assert.Empty(result.Model.PrivateConstants(consts));
+
+        // …the closure query — the used file's FileContext — reaches K but not UNUSED.
+        Assert.Equal(["K"], result.Model.PrivateConstants([lib, consts]).Select(c => c.Name));
+    }
 }

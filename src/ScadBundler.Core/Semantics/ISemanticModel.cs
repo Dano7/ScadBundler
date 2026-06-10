@@ -30,10 +30,25 @@ public interface ISemanticModel
     /// The top-level constants of <paramref name="usedFile"/> transitively referenced by its exported
     /// modules/functions — the "private constants" to carry when inlining a <c>use</c>. Excludes
     /// geometry, unreferenced variables, and <c>$</c>-variable settings. Returned in declaration order.
+    /// Sees only constants declared in the file itself; a <c>use</c> import must query the file's whole
+    /// include closure via <see cref="PrivateConstants(IReadOnlyList{SourceFile})"/>.
     /// </summary>
     /// <param name="usedFile">The used library file.</param>
     /// <returns>The transitively-reachable private constants.</returns>
     IReadOnlyList<AssignmentStatement> PrivateConstants(SourceFile usedFile);
+
+    /// <summary>
+    /// The private constants to carry when importing the include-merge of a <c>use</c>d file: the
+    /// top-level constants declared anywhere in <paramref name="mergedFiles"/> (a used file plus its
+    /// transitive includes — its <c>FileContext</c>) that are transitively referenced by any of those
+    /// files' exported modules/functions. A used definition may read a constant its file pulls in via
+    /// <c>include</c> (<c>ScopeContext.cc</c> include-merge), so reachability runs over the whole
+    /// closure. Exclusions match the single-file form; returned grouped by file in
+    /// <paramref name="mergedFiles"/> order, then declaration order.
+    /// </summary>
+    /// <param name="mergedFiles">The used file's include closure (conventionally itself first).</param>
+    /// <returns>The transitively-reachable private constants across the closure.</returns>
+    IReadOnlyList<AssignmentStatement> PrivateConstants(IReadOnlyList<SourceFile> mergedFiles);
 
     /// <summary>
     /// Binds a reference (an <see cref="Identifier"/> in value position, a function call's callee

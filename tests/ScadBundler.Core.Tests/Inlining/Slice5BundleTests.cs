@@ -50,6 +50,33 @@ public sealed class Slice5BundleTests
     }
 
     [Fact]
+    public void Use_DefinitionReadingItsIncludesConstant_CarriesTheConstant()
+    {
+        // The modulecache-tests `includefrommodule` shape, caught by the OpenSCAD differential
+        // harness: the used file's module reads a constant that arrives via the used file's own
+        // `include` (ScopeContext.cc include-merge). The import must carry the constant — without
+        // it the bundle silently renders with `undef`.
+        var (bundled, diagnostics) = BundleHelper.Bundle(
+            null,
+            ("main.scad", "use <lib.scad>\nwidget();"),
+            ("lib.scad", "include <consts.scad>\nmodule widget() cube(SIZE);"),
+            ("consts.scad", "SIZE = 5;\nIGNORED = 7;"));
+
+        // The body's (renamed) reference must agree with an emitted top-level assignment of 5…
+        ModuleDefinition widget = SemanticHelper.Find<ModuleDefinition>(
+            bundled, m => m.Name.EndsWith("widget", StringComparison.Ordinal));
+        Identifier reference = SemanticHelper.Find<Identifier>(widget);
+        Assert.Contains(bundled.Statements, s =>
+            s is AssignmentStatement { Value: NumberLiteral { Value: 5 } } a && a.Name == reference.Name);
+
+        // …while the closure's unreferenced constant stays out, under any name.
+        Assert.DoesNotContain(
+            BundleHelper.TopLevelDeclarationNames(bundled),
+            n => n.EndsWith("IGNORED", StringComparison.Ordinal));
+        Assert.Empty(diagnostics);
+    }
+
+    [Fact]
     public void B003_Assign_NormalizedToLet()
     {
         var (bundled, diagnostics) = BundleHelper.Bundle(

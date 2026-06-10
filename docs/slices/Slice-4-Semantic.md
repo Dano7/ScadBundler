@@ -12,7 +12,7 @@
 - [ ] Per-file declaration queries (`Modules`/`Functions`/`TopLevelVariables`) return exactly the top-level declarations of each file, in declaration order.
 - [ ] `Resolve(reference)` binds a reference to its **top-level** `Symbol`, or returns `null` for a local binding / parameter / built-in / special variable / unresolved — per the scoping rules in §5.
 - [ ] `ReferencesTo(symbol)` returns every reference bound to that declaration (for the inliner's rename rewriting).
-- [ ] `PrivateConstants(usedFile)` returns the transitive set of that file's own top-level constants reachable from its exported modules/functions (§7) — the V2 enabler.
+- [ ] `PrivateConstants(usedFile)` returns the transitive set of that file's own top-level constants reachable from its exported modules/functions (§7) — the V2 enabler. *(Post-v1 amendment: "own" = the file's include closure, and a closure overload exists — see §7.)*
 - [ ] Within-scope duplicate detection: variable reassignment → **SB3003**, module/function redefinition → **SB3004** (last-wins, per `LocalScope.cc`).
 - [ ] Validation: invalid `.member` → **SB3001** (`S-001`); comprehension generator outside a vector → **SB3002** (`S-002`); conservative unknown-reference → **SB3005**.
 - [ ] Special variables (`$fn`, …) are classified as dynamically-scoped and **never** resolve to a renameable symbol.
@@ -132,11 +132,19 @@ Only **File-scope** declarations produce renameable `Symbol`s. Everything inner 
 Computes the top-level constants a `use`d file's exported callables need (so the inliner can carry them as private constants — the V2 behavior):
 
 1. Seed = the file's exported `Modules` + `Functions`.
-2. Walk each seed's body; for every variable read that `Resolve`s to one of **this file's own** top-level variables, add that variable's `AssignmentStatement` to the result set.
+2. Walk each seed's body; for every variable read that `Resolve`s to one of **this file-context's** top-level variables (the file itself or anything it transitively `include`s — `ScopeContext.cc` include-merge), add that variable's `AssignmentStatement` to the result set.
 3. Transitively close: also walk the bodies of added constants' initializers (a constant may reference other top-level constants), and any module/function those reference.
 4. Return the collected assignments (deduped, in declaration order). Geometry, unreferenced variables, and `$`-var settings are **excluded**.
 
 > This is what lets the inliner emit a `use`d library's `WALL = 2;` alongside `module box() cube(WALL);` while dropping its top-level geometry — and namespace them on collision so the using file cannot perturb them.
+
+> **Post-v1 amendment (2026-06-10, caught by the OpenSCAD differential harness):** "own" originally read
+> as the *textual* file; the correct unit is the file's **FileContext** — the file plus its transitive
+> `include`s. The official `modulecache-tests/includefrommodule.scad` shape (a `use`d file whose own
+> `include` supplies the constant its module reads) silently rendered `undef` under the textual rule.
+> `ISemanticModel` therefore gained a closure overload, `PrivateConstants(IReadOnlyList<SourceFile>)`,
+> which the inliner queries per use-target include closure (unioned across targets); the analyzer records
+> reachability edges per include closure (`IsInCurrentFileContext`), not per textual file.
 
 ## 8. Validation diagnostics (this slice)
 
