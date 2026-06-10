@@ -6,33 +6,55 @@ You are picking up **ScadBundler**, an AST-based OpenSCAD file bundler (C# / .NE
 
 ## ▶ Next session — start here
 
-The attribution work and the Customizer computed-params regression fix are **done** (see "Done this
-session" below). Remaining post-v1 work, pick one:
+The attribution work, the Customizer computed-params regression fix, and the last-wins winner-position
+fix are **done** (see the "Done" sections below). Remaining post-v1 work, pick one:
 
-1. **Last-wins winner position** (new, from the 2026-06-10 session — a *correctness* gap, so it
-   outranks the feature items): for include-origin variable collisions the inliner emits the winning
-   `AssignmentStatement` at its **last** document position, but OpenSCAD evaluates the winning
-   expression at the **first** assignment's position (`LocalScope.cc` replaces the expression in
-   place). Repro: lib `x = 1; y = x * 2;`, root `include <lib.scad>; module m() {…} x = 5;` (the
-   root's `x = 5` must sit *after* the first definition so the prologue hoist doesn't mask it) —
-   OpenSCAD yields `y = 10`, the bundle yields `y = undef`. SB5008 now *detects* this ordering; the
-   fix is to emit the winner at the first colliding occurrence's emit position. Add a
-   `Slice5BundleTests` unit proving position + no SB5008, and validate with the differential recipe
-   below.
-2. **OpenSCAD integration harness (V1–V3)** — now **de-risked**: the differential recipe was proven
-   manually on 2026-06-10 (see §"Post-v1 work"). Wrap it in an env-gated `tests/ScadBundler.IntegrationTests`
+1. **OpenSCAD integration harness (V1–V3)** — now **de-risked**: the differential recipe was proven
+   manually on 2026-06-10 (see §"Post-v1 work") and has validated two regression classes end-to-end
+   (computed-params hoist; last-wins winner position). Wrap it in an env-gated `tests/ScadBundler.IntegrationTests`
    project with skippable facts.
-3. **Obfuscator (`--obfuscate`)** — [Post-Demo-Plan.md](docs/Post-Demo-Plan.md) Item D (**vNext**). A
+2. **Obfuscator (`--obfuscate`)** — [Post-Demo-Plan.md](docs/Post-Demo-Plan.md) Item D (**vNext**). A
    thin layer over the always-namespace work: same candidate set + reference rewrite + prologue exemption,
    only the name *generator* changes. Must use **deterministic** ids (a counter), never memory addresses
    (those break goldens/idempotence). Design note: an obfuscated bundle should keep the **license block**
    (legal text must survive) even if the per-section banners are dropped.
-4. Broader post-v1: WASM/JSON API + "ScadBundler Live", real-world golden masters (BOSL2/NopSCADlib/
+3. Broader post-v1: WASM/JSON API + "ScadBundler Live", real-world golden masters (BOSL2/NopSCADlib/
    dotSCAD), emitter line-length wrapping. See §"Post-v1 work". The real-world golden masters now also
    exercise the attribution pass against genuine library license headers (BOSL2 is BSD-2-Clause,
    NopSCADlib GPL-3.0).
 
-### Done this session (2026-06-10) — Customizer computed-params regression fix + SB5008
+### Done this session (2026-06-10, session 2) — last-wins winner emit position + `keep-first` rationale docs
+
+For include-origin variable collisions the inliner emitted the winning `AssignmentStatement` at its
+**last** document position, so a dependent read between the two (`y = x * 2;`) could precede the
+surviving assignment and evaluate `undef` (the SB5008 shape). OpenSCAD evaluates the winning
+expression at the **first** assignment's position. **Ground-truth correction:** the in-place overwrite
+is in `parser.y` `handle_assignment` → `Assignment::setExpr` (lines 757–790), **not** `LocalScope.cc`
+as previously noted here — `LocalScope::addAssignment` is a plain `push_back`; verify there, not in
+`LocalScope.cc`.
+
+1. **Fix** ([Inliner.cs](src/ScadBundler.Core/Inlining/Inliner.cs)): for variable groups,
+   `KeepLastWins` now marks the **first** occurrence as the winner and records a `_replacements`
+   entry (first node `with { Value = last.Value }`); `Assemble` substitutes it at emit time
+   (`Substituted`). The first occurrence's slot/trivia survive; references inside the moved
+   expression still hit the rename map (the `Value` subtree keeps its node identities).
+   Modules/functions are scope-wide in OpenSCAD, so they keep the old keep-last-node path.
+2. **Deliberate non-change — do not "fix" later:** `--on-collision keep-first` still keeps the first
+   assignment's **original** expression. It is a deliberate-divergence repair strategy (no OpenSCAD
+   analogue), not emulation — do not extend the in-place substitution to `KeepFirst` for consistency.
+   Rationale now documented: [UX.md](docs/UX.md) **"Collision Strategies"** (new section: per-strategy
+   table, why `keep-first` exists — vendored-include stomps, version-skew diamonds — and its caveats),
+   [Spec.md](docs/Spec.md) "Collision-strategy implication", the `CollisionStrategy.KeepFirst` XML
+   docs, and the SB3003 note in [Diagnostics.md](docs/Diagnostics.md).
+3. **Tests:** `IncludeVariableReassignment_EmitsWinningExpressionAtFirstPosition`
+   (`Slice5BundleTests`) — winner's value (`5`) at lib's slot ahead of the dependent read, SB3003
+   still fires, SB5008 silent. **582 tests.** No corpus goldens affected (none collide on variables).
+4. **Differential validation (official binary):** repro (lib `x = 1; y = x * 2;`, root
+   `include <lib.scad>; module m() …; x = 5;` — the override *after* the first definition so the
+   prologue hoist doesn't mask it) → bundle → `openscad.com -o *.csg` both sides → **byte-identical**
+   (`cube([5, 10, 1])`, i.e. `y = 10`; the pre-fix bundle yields `y = undef`).
+
+### Done earlier (2026-06-10, session 1) — Customizer computed-params regression fix + SB5008
 
 The prologue hoist from Item A was too greedy: it hoisted **computed** root assignments (e.g.
 `cleat_spacing_x = goews_staggered_x_spacing;`) above the included library that assigns their inputs.
@@ -101,15 +123,16 @@ truth verified at `C:\git\hub\openscad`.
 ## Current state
 
 - **Slices 1–6 done** + **post-demo Items A/B/C** + **post-v1 #1–#4** (the attribution pass — license
-  aggregation + provenance banners) + the Customizer computed-params regression fix (SB5008):
-  `dotnet build` zero-warning (warnings-as-errors), `dotnet test` green (**581 tests**: 561 in
+  aggregation + provenance banners) + the Customizer computed-params regression fix (SB5008) + the
+  last-wins winner-position fix:
+  `dotnet build` zero-warning (warnings-as-errors), `dotnet test` green (**582 tests**: 562 in
   `ScadBundler.Core.Tests`, 20 in `ScadBundler.Cli.Tests`). Coverage: `Lexing/`≈98%, `Parsing/`≈99%, `Semantics/` 100%, `Loading/`≈98.8%,
   `Inlining/`≈99.6% (**`Attribution.cs` 100%**), `Emitting/`: `Emitter.cs`≈97%, `EmitOptions.cs` 100%.
 - **Post-demo (this session), see [docs/Post-Demo-Plan.md](docs/Post-Demo-Plan.md):**
-  - **A — Customizer parameters preserved.** The root file's leading **literal** parameter assignments are hoisted to the top of the bundle (verbatim, never renamed) and a synthesized `/* [Hidden] */` fences the rest, so OpenSCAD's Customizer shows the model's real knobs instead of an included library's globals. Computed assignments are not parameters (OpenSCAD `Expression::isLiteral` gate) and keep their document position — see "Done this session (2026-06-10)". Verified on `C:\git\dan\SCAD\ForkedHolder.scad`. ([Inliner.cs](src/ScadBundler.Core/Inlining/Inliner.cs); goldens `slice5-bundle/B-008`, `B-009`.)
+  - **A — Customizer parameters preserved.** The root file's leading **literal** parameter assignments are hoisted to the top of the bundle (verbatim, never renamed) and a synthesized `/* [Hidden] */` fences the rest, so OpenSCAD's Customizer shows the model's real knobs instead of an included library's globals. Computed assignments are not parameters (OpenSCAD `Expression::isLiteral` gate) and keep their document position — see "Done earlier (2026-06-10, session 1)". Verified on `C:\git\dan\SCAD\ForkedHolder.scad`. ([Inliner.cs](src/ScadBundler.Core/Inlining/Inliner.cs); goldens `slice5-bundle/B-008`, `B-009`.)
   - **B — OpenSCAD-faithful search paths.** New [OpenScadEnvironment.cs](src/ScadBundler.Core/Loading/OpenScadEnvironment.cs) reconstructs OpenSCAD's `parser_init` order: absolutized `OPENSCADPATH` (empty→CWD) + the per-user library folder. Wired through `Bundler`/`BundleCommand`.
   - **C (`--qualify-all`)** and **D (obfuscator, vNext)** remain scoped but unimplemented.
-- Branch is **`Claude_implementation`**. Last feature commit: `fix(inliner): hoist only literal Customizer params; add SB5008 forward-ref guard` (2026-06-10).
+- Branch is **`Claude_implementation`**. Last feature commit: `e61c1ff fix(inliner): emit last-wins variable expression at first assignment position` (2026-06-10).
 - **Projects:** `src/ScadBundler.Core` (the library), **`src/ScadBundler`** (the CLI, `PackAsTool` → `scadbundler`), `tests/ScadBundler.Core.Tests`, **`tests/ScadBundler.Cli.Tests`**. All four are in `ScadBundler.sln`.
 - **Entry points:** `Bundler.Bundle(rootPath, options)` (disk + `OPENSCADPATH`) → `BundleResult`; `Emitter.Emit(scadFile, EmitOptions?)` → `string`. The CLI wires them in `src/ScadBundler/BundleCommand.cs`.
 
@@ -123,10 +146,12 @@ truth verified at `C:\git\hub\openscad`.
 
 ## Watch items / known gaps (from the Slice-5 cold review)
 
-- **Last-wins winner emitted at the wrong position** *(open — queued as next-session item 1)*: the
-  winning include-collision assignment is emitted at its **last** document position; OpenSCAD evaluates
-  the winning expression at the **first** assignment's position. A bundle can compute `undef` where the
-  original computed a value. SB5008 detects it; the emit-position fix is not yet done.
+- ~~**Last-wins winner emitted at the wrong position**~~ **Resolved (2026-06-10, session 2):** variable
+  groups now emit the winning expression at the **first** colliding occurrence's slot (`KeepLastWins`
+  records a `_replacements` substitution; `Assemble` applies it), matching OpenSCAD's in-place overwrite
+  — ground truth `parser.y` `handle_assignment` → `Assignment::setExpr`, *not* `LocalScope.cc` (plain
+  `push_back`). Differential-validated byte-identical CSG. `keep-first` deliberately exempt (see "Done
+  this session (2026-06-10, session 2)").
 - **Prologue cutoff approximates `getLineToStop`** *(accepted, conservative)*: OpenSCAD collects literal
   params up to the **first `{` line** of the root text; our prologue run ends at the first
   definition/instantiation/control-flow statement. A brace-free instantiation (`cube(1);`) followed by
@@ -150,7 +175,7 @@ truth verified at `C:\git\hub\openscad`.
 
 - **WASM/JSON API + "ScadBundler Live"** web companion (the Core is dependency-free and consumable for this).
 - **Real-world golden masters**: small slices of BOSL2 / NopSCADlib / dotSCAD.
-- **Integration harness (V1–V3)** against the official OpenSCAD C++ engine (test-only; render-equivalence). Ground truth checkout at `C:\git\hub\openscad`; fixtures in its `examples/` and `tests/data/modulecache-tests/`, plus Dan's real projects in `C:\git\dan\SCAD\`. **Recipe proven manually (2026-06-10):** the binary is at `C:\Program Files\OpenSCAD\openscad.com` (the `.com` console wrapper gives proper stderr); per root: (1) `openscad.com -o original.csg root.scad` (fast — stops after CSG generation, no CGAL render), (2) bundle, (3) `openscad.com -o bundled.csg bundle.scad`, (4) assert the bundle adds **no new `WARNING:` stderr lines** (strip file/line before diffing) and the two `.csg` files are **byte-identical** (CSG is fully elaborated geometry, so namespacing renames never appear). Caveats: `rands()`/`$t` models are nondeterministic → warning-diff only; gate the project on an `OPENSCAD_EXE` env var with a default-path probe and skippable facts so CI without OpenSCAD skips. This exact loop catches the computed-params class of regression instantly.
+- **Integration harness (V1–V3)** against the official OpenSCAD C++ engine (test-only; render-equivalence). Ground truth checkout at `C:\git\hub\openscad`; fixtures in its `examples/` and `tests/data/modulecache-tests/`, plus Dan's real projects in `C:\git\dan\SCAD\`. **Recipe proven manually (2026-06-10):** the binary is at `C:\Program Files\OpenSCAD\openscad.com` (the `.com` console wrapper gives proper stderr); per root: (1) `openscad.com -o original.csg root.scad` (fast — stops after CSG generation, no CGAL render), (2) bundle, (3) `openscad.com -o bundled.csg bundle.scad`, (4) assert the bundle adds **no new `WARNING:` stderr lines** (strip file/line before diffing) and the two `.csg` files are **byte-identical** (CSG is fully elaborated geometry, so namespacing renames never appear). Caveats: `rands()`/`$t` models are nondeterministic → warning-diff only; gate the project on an `OPENSCAD_EXE` env var with a default-path probe and skippable facts so CI without OpenSCAD skips. This exact loop catches the computed-params and last-wins-position classes of regression instantly (both proven 2026-06-10).
 - Line-length wrapping in the emitter (`MaxLineLength` is advisory today). (`--bundle-licenses`
   aggregation is **done** — this session.)
 
@@ -168,6 +193,6 @@ dotnet pack src/ScadBundler -c Release            # build the dotnet-tool packag
 
 ## Workflow / repo conventions
 
-- Commits on `Claude_implementation`, **conventional commits**, ending with the `Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>` trailer. Commit when a unit is done; don't push unless asked.
+- Commits on `Claude_implementation`, **conventional commits**, ending with the current model's `Co-Authored-By` trailer (e.g. `Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>`). Commit when a unit is done; don't push unless asked.
 - `.gitattributes` forces **LF**; `.editorconfig` enforces file-scoped namespaces, `var`-only-when-apparent, no top-level statements, and warnings-as-errors. Every **public** Core member needs XML docs (CS1591); watch CA1859/CA1822.
 - If you find a genuine spec gap/ambiguity, **fix the spec too** (one-shot, spec-driven). Slice 6 locked the keyword-paren spacing rule in `docs/slices/Slice-6-Emitter-CLI.md` §5.
