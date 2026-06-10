@@ -267,6 +267,18 @@ public static class Inliner
         private List<Candidate> GatherUseImports(List<LoadedFile> usedFiles)
         {
             var items = new List<Candidate>();
+
+            // A used definition may read constants its file include-merges (ScopeContext.cc), so
+            // constant neededness is computed over each use target's whole include closure — and
+            // unioned across targets, because a file shared by two closures is imported only once
+            // but must carry a constant if EITHER closure reaches it.
+            var privateConstants = new HashSet<AssignmentStatement>(ReferenceEqualityComparer.Instance);
+            foreach (LoadedFile used in usedFiles)
+            {
+                privateConstants.UnionWith(_model.PrivateConstants(
+                    [.. IncludeClosure(used).Select(f => f.Source)]));
+            }
+
             var importedFiles = new HashSet<SourceFile>();
             foreach (LoadedFile used in usedFiles)
             {
@@ -276,9 +288,6 @@ public static class Inliner
                     {
                         continue; // import each file's defs once
                     }
-
-                    var privateConstants = new HashSet<AssignmentStatement>(
-                        _model.PrivateConstants(file.Source), ReferenceEqualityComparer.Instance);
 
                     foreach (Statement statement in file.Ast.Statements)
                     {

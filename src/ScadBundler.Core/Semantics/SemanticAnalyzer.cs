@@ -30,7 +30,10 @@ public sealed class SemanticAnalyzer
     // Pass-2 side tables (reference identity, per AST-Reference §15.6).
     private readonly Dictionary<AstNode, Symbol> _resolution = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<AstNode, List<AstNode>> _referencesTo = new(ReferenceEqualityComparer.Instance);
-    private readonly Dictionary<AstNode, List<Symbol>> _ownFileReferences = new(ReferenceEqualityComparer.Instance);
+    private readonly Dictionary<AstNode, List<Symbol>> _fileContextReferences = new(ReferenceEqualityComparer.Instance);
+
+    // Each file's include closure (itself + everything it transitively includes): its FileContext.
+    private readonly Dictionary<SourceFile, HashSet<SourceFile>> _includeClosures = [];
 
     // Mutable walk state (single-threaded; reset per file / construct).
     private readonly List<LocalFrame> _scopeChain = [];
@@ -78,6 +81,8 @@ public sealed class SemanticAnalyzer
             _scopes[file.Source] = BuildFileScope(file);
         }
 
+        BuildIncludeClosures(files);
+
         // Pass 2: reference resolution + validation, each file in its own environment.
         foreach (LoadedFile file in files)
         {
@@ -96,13 +101,13 @@ public sealed class SemanticAnalyzer
             referencesTo[declaration] = references;
         }
 
-        var ownFileReferences = new Dictionary<AstNode, IReadOnlyList<Symbol>>(ReferenceEqualityComparer.Instance);
-        foreach ((AstNode declaration, List<Symbol> edges) in _ownFileReferences)
+        var fileContextReferences = new Dictionary<AstNode, IReadOnlyList<Symbol>>(ReferenceEqualityComparer.Instance);
+        foreach ((AstNode declaration, List<Symbol> edges) in _fileContextReferences)
         {
-            ownFileReferences[declaration] = edges;
+            fileContextReferences[declaration] = edges;
         }
 
-        var model = new SemanticModel(declarations, _resolution, referencesTo, ownFileReferences);
+        var model = new SemanticModel(declarations, _resolution, referencesTo, fileContextReferences);
 
         IReadOnlyList<Diagnostic> sorted = [.. _diagnostics.ToList()
             .OrderBy(d => d.Span.File.Path, StringComparer.Ordinal)
@@ -131,6 +136,38 @@ public sealed class SemanticAnalyzer
 
         return result;
     }
+
+    private void BuildIncludeClosures(IReadOnlyList<LoadedFile> files)
+    {
+        foreach (LoadedFile file in files)
+        {
+            var closure = new HashSet<SourceFile>();
+            var stack = new Stack<LoadedFile>();
+            stack.Push(file);
+            while (stack.Count > 0)
+            {
+                LoadedFile current = stack.Pop();
+                if (!closure.Add(current.Source))
+                {
+                    continue; // diamond / cycle guard
+                }
+
+                foreach (IncludeEdge edge in current.Includes)
+                {
+                    if (edge.Target is LoadedFile target)
+                    {
+                        stack.Push(target);
+                    }
+                }
+            }
+
+            _includeClosures[file.Source] = closure;
+        }
+    }
+
+    // Closures exist for every file before pass 2 starts; indexing asserts that invariant.
+    private bool IsInCurrentFileContext(SourceFile declaringFile) =>
+        _includeClosures[_currentFile].Contains(declaringFile);
 
     // ---------------------------------------------------------------------------------------------
     // Pass 1 — declaration tables (§6) + duplicate detection (SB3003/SB3004)
@@ -687,13 +724,16 @@ public sealed class SemanticAnalyzer
 
         references.Add(reference);
 
-        // Record own-file reachability edges for PrivateConstants (geometry has no current decl).
-        if (_currentTopLevelDecl is not null && symbol.File == _currentFile)
+        // Record file-context reachability edges for PrivateConstants (geometry has no current decl).
+        // The context is the include closure, not the textual file: a definition may read a constant
+        // its file pulls in via `include` (ScopeContext.cc include-merge), and a `use` of that file
+        // must carry the constant along.
+        if (_currentTopLevelDecl is not null && IsInCurrentFileContext(symbol.File))
         {
-            if (!_ownFileReferences.TryGetValue(_currentTopLevelDecl, out List<Symbol>? edges))
+            if (!_fileContextReferences.TryGetValue(_currentTopLevelDecl, out List<Symbol>? edges))
             {
                 edges = [];
-                _ownFileReferences[_currentTopLevelDecl] = edges;
+                _fileContextReferences[_currentTopLevelDecl] = edges;
             }
 
             edges.Add(symbol);
