@@ -1,0 +1,88 @@
+@inject IJSRuntime JS
+
+@if (Result is { } result)
+{
+    <section class="output">
+        <div class="output-header">
+            <h2>Bundle</h2>
+            <span class="stats">@StatsLine</span>
+        </div>
+
+        <textarea class="output-text" readonly rows="16">@result.Text</textarea>
+
+        <div class="output-actions">
+            <button type="button" @onclick="CopyAsync" disabled="@(!CanEmit)">Copy</button>
+            <button type="button" @onclick="DownloadAsync" disabled="@(!CanEmit)">Download @FileName</button>
+            @if (_copied)
+            {
+                <span class="copied" role="status">Copied!</span>
+            }
+        </div>
+    </section>
+}
+
+@code {
+    /// <summary>The bundle to display; <c>null</c> renders nothing (no complete bundle yet).</summary>
+    [Parameter]
+    public WebBundleResult? Result { get; set; }
+
+    /// <summary>The root's canonical virtual path, used to derive the download file name.</summary>
+    [Parameter]
+    public string? RootPath { get; set; }
+
+    private bool _copied;
+
+    // Copy/Download are live only for a successful, non-empty bundle.
+    private bool CanEmit => Result is { Ok: true } && Result.Text.Length > 0;
+
+    private string FileName => RootStem(RootPath) + ".bundled.scad";
+
+    private string StatsLine
+    {
+        get
+        {
+            if (Result is not { } result)
+            {
+                return string.Empty;
+            }
+
+            int files = result.Stats.FilesInlined + 1; // inlined count excludes the root file
+            double kb = result.Stats.OutputBytes / 1024.0;
+            return string.Create(
+                System.Globalization.CultureInfo.InvariantCulture,
+                $"{files} file{(files == 1 ? "" : "s")} combined · {kb:0.0} KB");
+        }
+    }
+
+    private async Task CopyAsync()
+    {
+        if (Result is { } result)
+        {
+            _copied = await JS.InvokeAsync<bool>("scadLive.copyText", result.Text);
+        }
+    }
+
+    private async Task DownloadAsync()
+    {
+        if (Result is { } result)
+        {
+            await JS.InvokeVoidAsync("scadLive.download", FileName, result.Text);
+        }
+    }
+
+    // The root file's name without directory or extension; "bundle" as a safe fallback.
+    private static string RootStem(string? rootPath)
+    {
+        if (string.IsNullOrEmpty(rootPath))
+        {
+            return "bundle";
+        }
+
+        string normalized = rootPath.Replace('\\', '/');
+        int slash = normalized.LastIndexOf('/');
+        string name = slash < 0 ? normalized : normalized[(slash + 1)..];
+        int dot = name.LastIndexOf('.');
+        string stem = dot <= 0 ? name : name[..dot];
+        return stem.Length == 0 ? "bundle" : stem;
+    }
+}

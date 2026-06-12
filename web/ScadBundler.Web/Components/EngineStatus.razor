@@ -1,0 +1,8 @@
+<!--
+  The "loading…" affordance lives in index.html and is shown until the WASM runtime boots and replaces
+  the #app placeholder with the live UI. Once this component renders, the runtime is by definition ready,
+  so it simply reports "ready" and the drop zone is active.
+-->
+<div class="engine-status ready" role="status" aria-live="polite">
+    <span class="dot"></span> Engine ready — your files stay on this device.
+</div>

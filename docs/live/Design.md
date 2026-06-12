@@ -123,19 +123,30 @@ surface. Keep all of it in one small `wwwroot/interop.js`.
 
 | Need | Mechanism |
 |---|---|
-| Pick **files** | `InputFile` (managed; streams file contents — **no JS**). |
-| Pick a **folder** | An `<input type=file webkitdirectory>`; each `File.webkitRelativePath` carries the relative path. Cross-browser (Chrome/Edge/Firefox/Safari). The always-reliable structure path. |
-| Drag-and-drop **files** | A JS `drop` handler reads `DataTransfer.files`, passes name+text to .NET via `DotNet.invokeMethodAsync`. |
-| Drag-and-drop **folders** | Same handler walks `DataTransferItem.webkitGetAsEntry()` → recursive `FileSystemDirectoryEntry.createReader().readEntries()` to recover **relative paths**, so layout inference (Spec §6.3) gets real structure. (Note: `DataTransfer.files` alone omits folder contents — the entries API is required. Read entries promptly in the drop handler; filter to `.scad`/`.zip`.) |
-| Read a **`.zip`** | **Managed — BCL `System.IO.Compression.ZipArchive`** over the uploaded stream (works in WASM, **no JS lib**). Entry names give structure → `UploadedFile { Name = entryPath, Text }`. The most reliable mode (incl. mobile). |
-| Copy to clipboard | `navigator.clipboard.writeText` via `IJSRuntime`. |
+| Pick **files** | A programmatic hidden `<input type=file accept=".scad,.zip">` opened from JS; read each to text in JS. |
+| Pick a **folder** | A programmatic hidden `<input type=file webkitdirectory>`; each `File.webkitRelativePath` carries the relative path. Cross-browser (Chrome/Edge/Firefox/Safari). The always-reliable structure path. |
+| Drag-and-drop **files** | A JS `drop` handler reads the dropped items, passes `{name, kind, content}` to .NET via `DotNetObjectReference.invokeMethodAsync('Ingest', …)`. |
+| Drag-and-drop **folders** | Same handler walks `DataTransferItem.webkitGetAsEntry()` → recursive `FileSystemDirectoryEntry.createReader().readEntries()` to recover **relative paths**, so layout inference (Spec §6.3) gets real structure. (Note: `DataTransfer.files` alone omits folder contents — the entries API is required. `webkitGetAsEntry` is snapshotted **before** any `await`. Filtered to `.scad`/`.zip`.) |
+| Read a **`.zip`** | **Managed — BCL `System.IO.Compression.ZipArchive`** (`Ingestion/ZipIngestion.cs`) over the Base64 the JS hands up (works in WASM, **no JS lib**). Entry names give structure → `UploadedFile { Name = entryPath, Text }`. The most reliable mode (incl. mobile). |
+| Copy to clipboard | `navigator.clipboard.writeText` via `IJSRuntime` (returns a success bool). |
 | Download | Build a `Blob`, create an object URL, click a synthetic anchor, revoke — small JS function invoked from `OutputPanel`. |
-| Drop-zone styling | CSS `:drag` states + a class toggled by the JS handler. |
+| Drop-zone styling | A `dragover` class toggled by the JS handler. |
 
 All ingestion modes converge on the same output — `UploadedFile`s with a correct `Name` (relative path
 when structure is known). The Core/Workspace facade is **unaffected by how files arrived**; only the
 loose-file mode can produce the basename ambiguity the facade reports via `ProjectAnalysis.Ambiguous`.
 No JS UI framework, no bundler toolchain beyond what the .NET SDK provides.
+
+> **W1 implementation note (deviation from the original "pick = managed `InputFile`" sketch).** Folder
+> picks require `webkitRelativePath`, which Blazor's `InputFile`/`IBrowserFile` does **not** surface, so a
+> JS shim is unavoidable for the structure-preserving path. Rather than split ingestion across two code
+> paths (managed `InputFile` for loose files, JS for everything else), W1 routes **all** picking and
+> dropping through the single `interop.js`: it reads `.scad` entries to text and `.zip` entries to Base64,
+> then calls one `[JSInvokable] DropZone.Ingest(IngestItem[])`. The managed side
+> (`Ingestion/IngestItemReader` + `ZipIngestion`) does all unzipping. This keeps one coherent ingestion
+> path and still honors the hard constraints — **no JS library**, unzip in managed BCL, and the facade
+> unchanged. The trade-off (large file text crosses the JS↔WASM boundary as a string) is negligible at
+> maker scale; revisit only for BOSL2-scale inputs (already a documented perf stretch, §7).
 
 ---
 

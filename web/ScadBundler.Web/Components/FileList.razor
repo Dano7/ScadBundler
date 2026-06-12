@@ -1,0 +1,132 @@
+@if (Analysis is { } analysis)
+{
+    <section class="filelist">
+        <h2>Files</h2>
+
+        @if (analysis.Root is null && analysis.EntryPointCandidates.Count > 1)
+        {
+            <p class="filelist-hint">Couldn't pick a single main file automatically — these all look like
+                entry points. (Choosing one comes next.)</p>
+            <ul>
+                @foreach (string candidate in analysis.EntryPointCandidates)
+                {
+                    <li class="file"><span class="icon loaded" title="loaded">✓</span> @Display(candidate)</li>
+                }
+            </ul>
+        }
+        else
+        {
+            <ul>
+                @foreach ((string path, bool isRoot) in ResolvedFiles)
+                {
+                    <li class="file @(isRoot ? "root" : null)">
+                        @if (isRoot)
+                        {
+                            <span class="badge" title="main file">★ main</span>
+                        }
+                        <span class="icon loaded" title="loaded">✓</span> @Display(path)
+                    </li>
+                }
+                @foreach (string font in Fonts)
+                {
+                    <li class="file font"><span class="icon font" title="font">ⓕ</span> @font</li>
+                }
+            </ul>
+        }
+
+        @if (analysis.Missing.Count > 0 || analysis.Ambiguous.Count > 0)
+        {
+            <h3 class="needed-heading">Still needed</h3>
+            <ul class="needed">
+                @foreach (MissingReference missing in analysis.Missing)
+                {
+                    <li class="needed-row">
+                        <span class="icon needed" title="needed">⚠</span>
+                        <code>@missing.RawPath</code>
+                        <span class="needed-by">needed by @string.Join(", ", missing.NeededBy.Select(Display))</span>
+                    </li>
+                }
+                @foreach (AmbiguousReference ambiguous in analysis.Ambiguous)
+                {
+                    <li class="needed-row">
+                        <span class="icon needed" title="needs a choice">⚠</span>
+                        <code>@ambiguous.RawPath</code>
+                        <span class="needed-by">@ambiguous.Candidates.Count possible matches</span>
+                    </li>
+                }
+            </ul>
+        }
+    </section>
+}
+
+@code {
+    /// <summary>The analysis to display; <c>null</c> renders nothing.</summary>
+    [Parameter]
+    public ProjectAnalysis? Analysis { get; set; }
+
+    // The distinct resolved files of the dependency tree, root first, in walk order.
+    private IReadOnlyList<(string Path, bool IsRoot)> ResolvedFiles
+    {
+        get
+        {
+            var files = new List<(string, bool)>();
+            if (Analysis?.Tree is { } tree)
+            {
+                Walk(tree.Root, files, [], []);
+            }
+
+            return files;
+        }
+    }
+
+    // The distinct font pass-throughs of the dependency tree, in walk order.
+    private IReadOnlyList<string> Fonts
+    {
+        get
+        {
+            var fonts = new List<string>();
+            if (Analysis?.Tree is { } tree)
+            {
+                Walk(tree.Root, [], fonts, []);
+            }
+
+            return fonts;
+        }
+    }
+
+    private static void Walk(
+        DependencyNode node,
+        List<(string, bool)> files,
+        List<string> fonts,
+        HashSet<string> seen)
+    {
+        if (node.Origin == ReferenceOrigin.Font)
+        {
+            if (!fonts.Contains(node.VirtualPath))
+            {
+                fonts.Add(node.VirtualPath);
+            }
+
+            return;
+        }
+
+        if (!node.Resolved)
+        {
+            return; // unresolved references are shown in the "Still needed" section
+        }
+
+        if (seen.Add(node.VirtualPath))
+        {
+            files.Add((node.VirtualPath, node.IsRoot));
+        }
+
+        foreach (DependencyNode child in node.Children)
+        {
+            Walk(child, files, fonts, seen);
+        }
+    }
+
+    // Strip the synthetic "/proj/" project root for a maker-friendly display name.
+    private static string Display(string virtualPath) =>
+        virtualPath.StartsWith("/proj/", StringComparison.Ordinal) ? virtualPath["/proj/".Length..] : virtualPath;
+}
