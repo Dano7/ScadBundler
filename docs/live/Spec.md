@@ -358,11 +358,21 @@ mode:
    `"/proj/" + Name` verbatim. References resolve through the normal loader by construction.
 2. **Flat drop** (names are bare file names): place each at `"/proj/" + fileName`. Then, for every
    reference that does **not** resolve at its written sub-path, try to satisfy it by **basename match**
-   against an uploaded file; if found, *also place that file's content at the referenced sub-path*
-   (`"/proj/" + rawPath`, with the same canonical text). Repeat to a fixpoint.
+   against an uploaded file; if found, *also place that file's content at the path the loader will look
+   for it* (`Combine(includerDir, rawPath)` canonicalized — i.e. `"/proj/" + rawPath` when the including
+   file is at the project root; the includer-relative resolved path otherwise), with the same canonical
+   text. Repeat to a fixpoint.
+   - Basename matching is **case-insensitive** (`OrdinalIgnoreCase`): makers author on case-insensitive
+     file systems and reference with sloppy case (e.g. `include <forkedholderlib.scad>` for an uploaded
+     `ForkedHolderLib.scad`). The alias is still placed at the *exact* path the loader resolves, so the
+     bundle resolves precisely what the analysis predicted (the `InMemoryFileSystem` itself stays
+     case-sensitive/exact).
    - This makes `include <BOSL2/std.scad>` resolve to an uploaded `std.scad` **and** makes the real
      `Bundler.Bundle` call resolve the identical file — no basename hack inside the loader, no double-load
      for genuinely distinct files.
+   - An **absolute** reference (`include </abs/lib.scad>`) cannot be satisfied by basename placement (the
+     alias would have to live at the absolute path); it is left unresolved and reported in `Missing`, even
+     when an upload shares its basename.
    - **Ambiguity** (two uploaded files share a basename a reference needs, or one basename is needed at two
      different sub-paths): pick none automatically; emit an `AmbiguousReference` (§5.3) carrying the
      `Candidates` set. The UI resolves it with a one-click picker / inline path field (§3.3), which simply
