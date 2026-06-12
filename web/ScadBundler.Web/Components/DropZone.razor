@@ -1,0 +1,54 @@
+@implements IDisposable
+@inject IJSRuntime JS
+@inject WorkspaceController Controller
+
+<div class="dropzone" @ref="_zone">
+    <p class="dropzone-hint">Drop your project <strong>folder</strong>, <strong>files</strong>, or a
+        <strong>.zip</strong> here</p>
+    <div class="dropzone-actions">
+        <button type="button" @onclick="ChooseFolderAsync">Choose folder</button>
+        <button type="button" @onclick="ChooseFilesAsync">Choose files</button>
+    </div>
+    <p class="dropzone-note">Nothing leaves your device. Folder and <code>.zip</code> drops keep their
+        structure so library references resolve automatically.</p>
+</div>
+
+@code {
+    private ElementReference _zone;
+    private DotNetObjectReference<DropZone>? _selfRef;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender)
+        {
+            return;
+        }
+
+        _selfRef = DotNetObjectReference.Create(this);
+        await JS.InvokeVoidAsync("scadLive.init", _selfRef);
+        await JS.InvokeVoidAsync("scadLive.registerDropZone", _zone);
+    }
+
+    private async Task ChooseFilesAsync() => await JS.InvokeVoidAsync("scadLive.pickFiles");
+
+    private async Task ChooseFolderAsync() => await JS.InvokeVoidAsync("scadLive.pickFolder");
+
+    /// <summary>
+    /// Called from <c>interop.js</c> with the files of a drop / pick (text sources and Base64 zips). Expands
+    /// them to <see cref="UploadedFile"/>s (unzipping in managed code) and hands them to the controller,
+    /// which re-analyzes and re-bundles.
+    /// </summary>
+    /// <param name="items">The raw items the browser collected.</param>
+    [JSInvokable]
+    public void Ingest(IngestItem[] items)
+    {
+        ArgumentNullException.ThrowIfNull(items);
+        IReadOnlyList<UploadedFile> uploads = IngestItemReader.ToUploads(items);
+        if (uploads.Count > 0)
+        {
+            Controller.AddOrReplace(uploads);
+        }
+    }
+
+    public void Dispose() => _selfRef?.Dispose();
+}

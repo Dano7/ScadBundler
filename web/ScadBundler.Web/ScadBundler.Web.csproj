@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk.BlazorWebAssembly">
+
+  <PropertyGroup>
+    <RootNamespace>ScadBundler.Web</RootNamespace>
+    <AssemblyName>ScadBundler.Web</AssemblyName>
+
+    <!-- The web app is a thin shell over the Core/Workspace facade, not a documented library surface. -->
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+
+    <!-- Publish levers (Design §5): trim the payload; the workload is tiny so AOT is unnecessary. -->
+    <PublishTrimmed>true</PublishTrimmed>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly" Version="10.0.0" />
+    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly.DevServer" Version="10.0.0" PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\ScadBundler.Core\ScadBundler.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="ScadBundler.Web.Tests" />
+  </ItemGroup>
+
+</Project>

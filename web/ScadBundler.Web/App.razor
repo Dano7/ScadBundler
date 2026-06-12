@@ -1,0 +1,39 @@
+@implements IDisposable
+@inject WorkspaceController Controller
+
+<div class="page">
+    <Landing />
+    <EngineStatus />
+
+    <DropZone />
+
+    @if (Controller.Analysis is not null)
+    {
+        <FileList Analysis="Controller.Analysis" />
+
+        @if (Controller.Root is not null && Controller.Bundle is null)
+        {
+            <p class="still-need">@StillNeedMessage</p>
+        }
+    }
+
+    <OutputPanel Result="Controller.Bundle" RootPath="Controller.Root" />
+</div>
+
+@code {
+    // W1 shows a plain "still need N file(s)" line; the rich missing-file UX is W2 (Slice §3).
+    private string StillNeedMessage
+    {
+        get
+        {
+            int needed = (Controller.Analysis?.Missing.Count ?? 0) + (Controller.Analysis?.Ambiguous.Count ?? 0);
+            return $"Still need {needed} file{(needed == 1 ? string.Empty : "s")} before this project can be bundled.";
+        }
+    }
+
+    protected override void OnInitialized() => Controller.Changed += OnChanged;
+
+    private void OnChanged() => InvokeAsync(StateHasChanged);
+
+    public void Dispose() => Controller.Changed -= OnChanged;
+}

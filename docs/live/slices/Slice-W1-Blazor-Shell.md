@@ -1,6 +1,6 @@
 # Slice W1 — Blazor Shell + Bundle MVP
 
-**Status**: spec ready (not started).
+**Status**: **done (2026-06-12)** — see [../handoff.md](../handoff.md) for the running status.
 **Project**: `web/ScadBundler.Web/` (new Blazor WebAssembly app, .NET 10) + `tests/ScadBundler.Web.Tests/`.
 **Depends on**: [Slice-W0](Slice-W0-Workspace-Facade.md) (the facade it drives).
 **Read with**: [../Design.md](../Design.md) §3–§4 (components, state, interop), [../Spec.md](../Spec.md) §3.
@@ -92,11 +92,16 @@ main-file editing/promotion, problems panel (W2); options, deploy, preview.
 
 ## 6. Exit criteria
 
-- [ ] `dotnet build` zero-warning; the app runs via `dotnet run` and paints the shell before the runtime
-      finishes loading.
-- [ ] All three ingestion modes work — **folder**, **loose files**, and **`.zip`** — with folder/zip
-      preserving relative paths.
-- [ ] Dropping a complete multi-file project produces a bundle; **Copy** and **Download** work.
-- [ ] The downloaded bundle is byte-identical to the CLI's output for the same inputs.
-- [ ] bUnit smoke tests pass (file-list rendering, output gating).
-- [ ] `ScadBundler.Core` untouched except for the W0 `Workspace/` additions; no Core dependency added.
+- [x] `dotnet build` zero-warning; the app runs via `dotnet run` and paints the shell before the runtime
+      finishes loading. *(Verified: dev server serves the branded `#app` shell + "Engine loading…" before
+      the WASM runtime; runtime then boots with no console errors.)*
+- [x] All three ingestion modes work — **folder**, **loose files**, and **`.zip`** — with folder/zip
+      preserving relative paths. *(`interop.js` entries-API walk + `webkitdirectory` picker keep relative
+      paths; `.zip` unzipped in managed BCL `ZipArchive`. Zip + loose paths covered by unit tests.)*
+- [x] Dropping a complete multi-file project produces a bundle; **Copy** and **Download** work. *(Controller
+      bundle path covered; Copy/Download wired to `interop.js` and gated by bUnit tests.)*
+- [x] The downloaded bundle is byte-identical to the CLI's output for the same inputs. *(Inherited from W0
+      `BundleParityTests`; re-proven on the real `ForkedHolder.scad` tree via a throwaway loose-upload
+      parity check — 21 845 bytes identical, incl. the case-mismatched `include <forkedholderlib.scad>`.)*
+- [x] bUnit smoke tests pass (file-list rendering, output gating). *(15 web tests.)*
+- [x] `ScadBundler.Core` untouched except for the W0 `Workspace/` additions; no Core dependency added.

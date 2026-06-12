@@ -8,24 +8,98 @@ should be able to resume from here with no other context.
 
 ## ▶ Next session — start here
 
-**W0 (Workspace facade) is done, green, and committed.** Build **W1 — Blazor shell + bundle MVP**
-([slices/Slice-W1-Blazor-Shell.md](slices/Slice-W1-Blazor-Shell.md)). The keystone logic is finished and
-covered; W1 is a thin shell over it. Build order remaining: **W1 → W2 → W3** (W4 deferred — do not build).
+**W0 + W1 are done, green, and committed.** Build **W2 — Dependency UX & friendly errors**
+([slices/Slice-W2-Dependency-UX.md](slices/Slice-W2-Dependency-UX.md)). W1 stood up the shell + happy-path
+bundle; W2 makes the page **smart and forgiving**. Build order remaining: **W2 → W3** (W4 deferred — do not
+build).
 
-First things for W1:
-- Add `web/ScadBundler.Web` (Blazor WASM, .NET 10) **and** `tests/ScadBundler.Web.Tests` (bUnit) to
-  `ScadBundler.sln` (they are **not** wired yet).
-- Drive everything through the facade: `ProjectAnalyzer.Analyze(uploads, root?)` → gate on
-  `Missing` **and** `Ambiguous` both empty → `WebBundler.Bundle(fs, root, opts)` (Design §3.2/§3.3).
-- The optional stateful **`Workspace` aggregator** (Spec §5.6 / Slice-W0 deliverables) was **deferred to
-  W1** (the slice permits this) — add it in `Workspace/` if the `WorkspaceController` wants to wrap it;
-  it is pure sugar over `Analyze`/`Bundle`, not required for coverage.
-- **Manual acceptance** target: `C:\git\dan\SCAD\ForkedHolder.scad` + its libs. Note its `include
-  <forkedholderlib.scad>` is lower-case while the file on disk is `ForkedHolderLib.scad`; the analyzer's
-  **case-insensitive basename matching** (below) handles this, so a loose-file/zip upload still resolves.
+First things for W2 (the controller + facade already expose everything you need):
+- **Missing-reference drop targets** (`MissingRow`): render one ⚠ row per `ProjectAnalysis.Missing` with
+  its `NeededBy`; dropping the file anywhere re-analyzes (the existing `DropZone.Ingest` path already
+  feeds `WorkspaceController.AddOrReplace`).
+- **Entry-point override**: when `InferredRoot` is `null`, list `EntryPointCandidates` and call
+  `WorkspaceController.SetRoot(virtualPath)` on click (already implemented on the controller). Add a
+  "★ main" re-designate affordance on every file row.
+- **`MainFileEditor`**: debounced `<textarea>` → add `WorkspaceController.EditMainFile(newText)` (NOT yet
+  on the controller — deferred from W1; it replaces the root upload and re-analyzes). The current
+  `AddOrReplace` keys by `UploadedFile.Name`, so "edit" = re-add the root's `Name` with new text.
+- **`ProblemsPanel`** with the UI-only friendly-code map (Slice-W2 §3); SB4001 is already filtered out of
+  `ProjectAnalysis.Diagnostics` — do not reintroduce it.
+- **`StructureTree`** (read-only) + **`ConflictPicker`** for `ProjectAnalysis.Ambiguous` (re-add the chosen
+  file with `Name = rawPath`).
 
 > Ask the user before deciding the **W3 hosting target** and before adding **any** dependency to
 > `ScadBundler.Core`.
+
+---
+
+## Slice W1 — done (2026-06-12)
+
+The **Blazor WebAssembly shell + happy-path bundle MVP**: drop a complete multi-file project (folder /
+loose files / `.zip`) and get a copyable, downloadable single file — wired entirely to the W0 facade,
+**byte-identical to the CLI**. Core untouched; no Core dependency added.
+
+### Projects added (both wired into `ScadBundler.sln`)
+- **`web/ScadBundler.Web`** — `Microsoft.NET.Sdk.BlazorWebAssembly`, `net10.0`, refs `ScadBundler.Core`
+  only. `PublishTrimmed` + `InvariantGlobalization` on (Design §5). Explicit `Program.Main` (no top-level
+  statements) registers `WorkspaceController` (scoped). `GenerateDocumentationFile=false` (thin shell, not
+  a library surface). Packages: `Microsoft.AspNetCore.Components.WebAssembly` (+ `.DevServer`,
+  `PrivateAssets=all`).
+- **`tests/ScadBundler.Web.Tests`** — `bunit.web` 1.40.0 + xUnit; refs the web app. **15 tests.**
+
+### Files of note (`web/ScadBundler.Web`)
+- `State/WorkspaceController.cs` — the single state owner (Design §3.2): `AddOrReplace`/`Remove`/`SetRoot`/
+  `SetOptions` → `Recompute()` = `ProjectAnalyzer.Analyze(Uploads, root)` → gate on `Root != null` &&
+  `Missing`+`Ambiguous` empty → `WebBundler.Bundle`. Fires `Changed`. (`EditMainFile` deferred to W2.)
+- `Ingestion/ZipIngestion.cs` — BCL `ZipArchive` → `UploadedFile`s (`.scad` only, dirs skipped, paths
+  preserved). `Ingestion/IngestItem.cs` + `IngestItemReader` — the managed boundary the JS hands files to
+  (`text` verbatim, `zip` Base64-decoded + expanded; malformed items skipped, never thrown).
+- `Components/`: `Landing` (static blurb), `EngineStatus`, `DropZone` (+ `[JSInvokable] Ingest`), `FileList`
+  (★ badge, ✓/⚠/ⓕ icons, "still needed" rows), `OutputPanel` (Copy/Download gated on `Ok && Text>0`,
+  download named `<rootstem>.bundled.scad`). `App.razor` composes them + subscribes to `Changed`.
+- `wwwroot/index.html` (branded `#app` shell paints **before** the runtime), `wwwroot/interop.js`,
+  `wwwroot/css/app.css`.
+
+### Key decisions / deviations (spec edits made this slice)
+1. **Unified JS ingestion** instead of the original "pick files = managed `InputFile`" sketch. Blazor's
+   `InputFile`/`IBrowserFile` does **not** expose `webkitRelativePath`, so folder picks *require* a JS
+   shim anyway; rather than split the path, **all** picking + dropping go through one `interop.js`
+   (programmatic hidden `<input>` for picks; the `webkitGetAsEntry`/`readEntries` walk for drops). JS reads
+   `.scad` to text and `.zip` to Base64, then calls one `[JSInvokable] DropZone.Ingest(IngestItem[])`;
+   unzipping is **managed** (BCL). Still **no JS library**, facade unchanged. → **Design §4 updated** (table
+   + a "W1 implementation note" with the trade-off: file text crosses the JS↔WASM boundary as a string —
+   negligible at maker scale).
+2. **`EngineStatus` "loading" lives in `index.html`, not the component.** In a WASM app the runtime is
+   ready by the time any component renders, so the Blazor `EngineStatus` always shows "ready"; the
+   pre-boot "Engine loading…" is the static `#app` shell that Blazor replaces. Satisfies "paint shell
+   before runtime."
+3. **No Core `Workspace` aggregator added** (Spec §5.6). The web `WorkspaceController` plays that role over
+   the pure facade functions; the optional Core aggregator stays unbuilt (not needed for anything).
+
+### Quality / verification
+- **Build: 0 warnings.** **Tests: 763 green** (Core 691, CLI 23, Integration 34, **Web 15** [+15]).
+- **Real-world byte-identical parity re-proven** on `C:\git\dan\SCAD\ForkedHolder.scad` + its 4 libs via a
+  *throwaway* loose-upload test (deleted after): facade output == disk/CLI output, **21 845 bytes** each,
+  `Missing=0 Ambiguous=0`, `FilesInlined=4`. This exercises the case-insensitive basename inference
+  (`include <forkedholderlib.scad>` → `ForkedHolderLib.scad`, `<cleatarray.scad>` → `CleatArray.scad`) in
+  the hardest (structure-less) mode.
+- **App boots:** `dotnet run --project web/ScadBundler.Web --urls http://localhost:5219` serves the shell
+  + `_framework/blazor.webassembly.js` + `interop.js` (all 200); the WASM runtime boots with **no console
+  errors**; the branded shell paints before boot.
+
+### Gotchas the next session must know
+- **`webkitGetAsEntry()` must be called synchronously** on the `DataTransferItem`s *before* any `await`
+  (the items list is emptied after the handler yields) — `interop.js` snapshots entries first. If you add
+  more drop handling in W2, preserve that ordering.
+- **`MissingRow` drop targets (W2)** can reuse the same `scadLive.registerDropZone` machinery, or just let
+  drops anywhere on the main zone resolve them (the facade re-analyzes regardless of where the file landed).
+- **Manual run / preview**: the dev server is `dotnet run --project web/ScadBundler.Web --urls
+  http://localhost:5219`. (A `.claude/launch.json` was used transiently for the preview tool and removed;
+  recreate it if you want the managed preview again.) The preview tool's **screenshot timed out** twice
+  this session even though the app booted cleanly (console-verified) — prefer `preview_console_logs` /
+  curl over screenshots if it hangs.
+- **bUnit version**: pinned `bunit.web` 1.40.0 (classic `Bunit.TestContext` API). The `bunit` 2.x
+  metapackage exists (2.7.2) but renames the context type — don't "upgrade" it casually.
 
 ---
 
