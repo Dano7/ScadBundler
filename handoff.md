@@ -15,8 +15,12 @@ fix are all done too. Remaining post-v1 work, pick one:
    exercise the attribution pass against genuine library license headers (BOSL2 is BSD-2-Clause,
    NopSCADlib GPL-3.0) — and can ride the differential harness for render equivalence (incl. the new
    `--minify`/`--obfuscate` profiles).
-2. **Small focused follow-up:** [ForwardReferenceChecker.cs](src/ScadBundler.Core/Inlining/ForwardReferenceChecker.cs)
-   line coverage is ≈60% (see watch items) — bring it to the ≥95% bar.
+2. ~~**Small focused follow-up:** [ForwardReferenceChecker.cs](src/ScadBundler.Core/Inlining/ForwardReferenceChecker.cs)
+   line coverage is ≈60% — bring it to the ≥95% bar.~~ **Done (2026-06-11):** the per-node-kind test
+   file (`a382611`) had already taken it to 100% line coverage; this session added 5 more dedicated
+   tests (`Unary`, stepped `Range`, plain `LetExpression`, `$`-var/`PI` exemption, non-assignment skip)
+   so [ForwardReferenceCheckerTests.cs](tests/ScadBundler.Core.Tests/Inlining/ForwardReferenceCheckerTests.cs)
+   reaches **100% line coverage on its own**, no longer leaning on incidental `Slice5BundleTests` coverage.
 3. **Deferred Slice-7 extensions** ([Slice-7 §12](docs/slices/Slice-7-Minify-Obfuscate.md)): conservative
    constant folding + control-flow rewriting (loop unroll, `if`↔`?:`) — each gated by a per-shape
    differential fixture before shipping (SB5010 surfaces a guarded skip); plus the obfuscation knobs
@@ -229,11 +233,11 @@ truth verified at `C:\git\hub\openscad`.
   aggregation + provenance banners) + the Customizer computed-params regression fix (SB5008) + the
   last-wins winner-position fix + **the OpenSCAD integration harness** + the PrivateConstants
   include-closure fix + **Slice 7 (minifier & obfuscator)**:
-  `dotnet build` zero-warning (warnings-as-errors), `dotnet test` green (**682 tests**: 625 in
+  `dotnet build` zero-warning (warnings-as-errors), `dotnet test` green (**687 tests**: 630 in
   `ScadBundler.Core.Tests`, 23 in `ScadBundler.Cli.Tests`, 34 in `ScadBundler.IntegrationTests`).
   Coverage: `Lexing/`≈98%, `Parsing/`≈99%, `Semantics/` 100%, `Loading/`≈98.8%,
-  `Inlining/`: `Attribution`/`StructuralKey`/`Bundler` 100%, `BundleRewriter`≈99.6%, `Inliner.cs`≈98%,
-  **`ForwardReferenceChecker.cs`≈60% (known gap — see watch items)**, `Emitting/`: `Emitter.cs`≈97%,
+  `Inlining/`: `Attribution`/`StructuralKey`/`Bundler`/`ForwardReferenceChecker.cs` 100%,
+  `BundleRewriter`≈99.6%, `Inliner.cs`≈98%, `Emitting/`: `Emitter.cs`≈97%,
   `EmitOptions.cs` 100%, **`Transforming/`≈98%** (LiteralCanonicalization's `ReLexesTo` defensive
   reject branches + the unreachable `SymbolFor` throw are the only sub-95% lines).
 - **Post-demo (this session), see [docs/Post-Demo-Plan.md](docs/Post-Demo-Plan.md):**
@@ -272,10 +276,14 @@ truth verified at `C:\git\hub\openscad`.
   `/* [Group] */` directly above a *computed* assignment, the marker stays in the body with it, and the
   following hoisted literals fall under the previous group in the Customizer. Markers above literal
   assignments (the normal case, incl. author `/* [Hidden] */`) hoist correctly with their parameter.
-- **`ForwardReferenceChecker.cs` line coverage ≈60%** *(pre-existing; surfaced by this session's
-  coverage pass — the earlier "`Inlining/`≈99.6%" claim glossed it)*: lines 115–208, the read-walk
-  exemption branches (function-literal bodies/defaults, `let`/`for`/comprehension shadowing, `$`-vars),
-  are untested. Below the ≥95% bar; a small focused session.
+- ~~**`ForwardReferenceChecker.cs` line coverage ≈60%**: lines 115–208, the read-walk exemption
+  branches (function-literal bodies/defaults, `let`/`for`/comprehension shadowing, `$`-vars), are
+  untested.~~ **Resolved:** the per-node-kind test file (`a382611`) took the read-walk to 100% line
+  coverage; this session (2026-06-11) added 5 more dedicated tests (`Unary`, stepped `Range`, plain
+  `LetExpression`, `$`-var/`PI` exemption, non-assignment skip) so the file reaches **100% line +
+  ~98% branch coverage from `ForwardReferenceCheckerTests` alone**, independent of bundle tests. (The
+  remaining sub-100% branch is the `switch`'s implicit no-match arm — unreachable for free-read-bearing
+  node kinds.)
 - **V-001/V-003 integration fixtures need a binary that still evaluates `child()`/`assign()`** — the
   installed 2021.01 does (as `DEPRECATED:`). A future OpenSCAD that removes them would fail those two
   facts (V-001 would render without the child geometry); point `OPENSCAD_EXE` at a 2021.01 install.
