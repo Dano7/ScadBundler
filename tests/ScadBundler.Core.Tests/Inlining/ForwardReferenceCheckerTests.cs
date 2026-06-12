@@ -40,6 +40,28 @@ public sealed class ForwardReferenceCheckerTests
     }
 
     [Fact]
+    public void Unary_WalksOperand()
+    {
+        AssertForwardReads("a = -fwd;\nfwd = 1;", "fwd");
+    }
+
+    [Fact]
+    public void Range_WalksStartStepAndEnd_WhenStepIsPresent()
+    {
+        // The stepless range form (`[lo:hi]`) is exercised by LetComprehension above; this covers the
+        // optional middle step, walked between start and end.
+        AssertForwardReads("a = [lo:st:hi];\nlo = 0;\nst = 1;\nhi = 2;", "lo", "st", "hi");
+    }
+
+    [Fact]
+    public void LetExpression_WalksBindingValuesAndBody_BindingIsBound()
+    {
+        // A `let` whose body is an ordinary value (not a generator) parses as a LetExpression, distinct
+        // from the LetComprehension case below; `n` is bound for the body but the binding value is free.
+        AssertForwardReads("a = let (n = src) n + fwd;\nsrc = 1;\nfwd = 2;", "src", "fwd");
+    }
+
+    [Fact]
     public void ParenthesizedCallee_IsAVariableRead()
     {
         // Only a *bare identifier* callee is a scope-wide function reference; `(fn)` is an
@@ -117,6 +139,22 @@ public sealed class ForwardReferenceCheckerTests
     public void Each_WalksValue()
     {
         AssertForwardReads("a = [each fwd];\nfwd = [1, 2];", "fwd");
+    }
+
+    [Fact]
+    public void SpecialVariableAndConstant_AreExempt_EvenWhenAssignedLater()
+    {
+        // `$fn` is read before its later top-level assignment (a genuine forward read) yet never warns
+        // — special variables are exempt; `PI` (a built-in constant) is exempt too. Only `fwd` warns.
+        AssertForwardReads("a = $fn + PI + fwd;\n$fn = 1;\nfwd = 2;", "fwd");
+    }
+
+    [Fact]
+    public void NonAssignmentStatement_IsSkipped()
+    {
+        // Only top-level assignments are eagerly evaluated in document order; a module instantiation
+        // between assignments is stepped over (its arguments evaluate after all assignments).
+        AssertForwardReads("cube(1);\na = fwd;\nfwd = 1;", "fwd");
     }
 
     /// <summary>Parses the snippet (asserting it is clean) and runs only the checker over it.</summary>
