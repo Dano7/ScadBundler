@@ -1,6 +1,6 @@
 # Slice W2 — Dependency UX & Friendly Errors
 
-**Status**: spec ready (not started).
+**Status**: **done (2026-06-12)** — see [../handoff.md](../handoff.md).
 **Project**: `web/ScadBundler.Web/` + `tests/ScadBundler.Web.Tests/`.
 **Depends on**: [Slice-W1](Slice-W1-Blazor-Shell.md).
 **Read with**: [../Spec.md](../Spec.md) §3.2–§3.4 (inference UX, missing refs, replace/edit), §6 (algorithms).
@@ -104,12 +104,12 @@ by design — structure comes from the upload, not from in-page folder editing).
 
 ## 6. Exit criteria
 
-- [ ] Dropping a model with missing libraries lists each missing reference (with "needed by"); dropping
+- [x] Dropping a model with missing libraries lists each missing reference (with "needed by"); dropping
       the files resolves them and produces the bundle.
-- [ ] Ambiguous uploads prompt for the main file; clicking a file re-roots and re-analyzes.
-- [ ] Editing the main-file textarea re-analyzes live and updates used/unused/missing highlighting.
-- [ ] A read-only structure tree shows the resolved layout; a basename conflict offers a one-click picker
+- [x] Ambiguous uploads prompt for the main file; clicking a file re-roots and re-analyzes.
+- [x] Editing the main-file textarea re-analyzes live and updates used/unused/missing highlighting.
+- [x] A read-only structure tree shows the resolved layout; a basename conflict offers a one-click picker
       (+ inline path field) that resolves it — with **no** editable/draggable tree anywhere.
-- [ ] The problems panel shows real syntax/semantic issues with `file:line:col` + friendly text and
+- [x] The problems panel shows real syntax/semantic issues with `file:line:col` + friendly text and
       **never** shows SB4001 as an error.
-- [ ] bUnit tests for the missing-file, re-root, and diagnostics-filtering paths pass.
+- [x] bUnit tests for the missing-file, re-root, and diagnostics-filtering paths pass.

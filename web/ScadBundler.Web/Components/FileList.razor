@@ -1,30 +1,52 @@
+@inject WorkspaceController Controller
+
 @if (Analysis is { } analysis)
 {
     <section class="filelist">
         <h2>Files</h2>
 
-        @if (analysis.Root is null && analysis.EntryPointCandidates.Count > 1)
+        @if (analysis.Root is null)
         {
-            <p class="filelist-hint">Couldn't pick a single main file automatically — these all look like
-                entry points. (Choosing one comes next.)</p>
-            <ul>
-                @foreach (string candidate in analysis.EntryPointCandidates)
-                {
-                    <li class="file"><span class="icon loaded" title="loaded">✓</span> @Display(candidate)</li>
-                }
-            </ul>
+            @if (analysis.EntryPointCandidates.Count > 0)
+            {
+                <p class="filelist-hint">Which file is your model? (The others look like libraries.)</p>
+                <ul class="candidates">
+                    @foreach (string candidate in analysis.EntryPointCandidates)
+                    {
+                        <li class="file">
+                            <button type="button" class="link make-main"
+                                    @onclick="@(() => Controller.SetRoot(candidate))">★ use as main</button>
+                            <span class="icon loaded" title="loaded">✓</span> @Display(candidate)
+                        </li>
+                    }
+                </ul>
+            }
+            else
+            {
+                <p class="filelist-hint">Drop a <code>.scad</code> file to begin.</p>
+            }
         }
         else
         {
             <ul>
-                @foreach ((string path, bool isRoot) in ResolvedFiles)
+                @foreach (ClassifiedFile file in Classified)
                 {
-                    <li class="file @(isRoot ? "root" : null)">
-                        @if (isRoot)
+                    <li class="file @UsageClass(file.Usage)">
+                        @if (file.Usage == FileUsage.Root)
                         {
                             <span class="badge" title="main file">★ main</span>
                         }
-                        <span class="icon loaded" title="loaded">✓</span> @Display(path)
+                        else
+                        {
+                            <button type="button" class="link make-main" title="make this the main file"
+                                    @onclick="@(() => Controller.SetRoot(file.VirtualPath))">★ make main</button>
+                        }
+                        <span class="icon @IconClass(file.Usage)" title="@UsageTitle(file.Usage)">@IconChar(file.Usage)</span>
+                        @Display(file.VirtualPath)
+                        @if (file.Usage == FileUsage.Unused)
+                        {
+                            <span class="tag-unused">unused</span>
+                        }
                     </li>
                 }
                 @foreach (string font in Fonts)
@@ -37,24 +59,19 @@
         @if (analysis.Missing.Count > 0 || analysis.Ambiguous.Count > 0)
         {
             <h3 class="needed-heading">Still needed</h3>
-            <ul class="needed">
-                @foreach (MissingReference missing in analysis.Missing)
-                {
-                    <li class="needed-row">
-                        <span class="icon needed" title="needed">⚠</span>
-                        <code>@missing.RawPath</code>
-                        <span class="needed-by">needed by @string.Join(", ", missing.NeededBy.Select(Display))</span>
-                    </li>
-                }
-                @foreach (AmbiguousReference ambiguous in analysis.Ambiguous)
-                {
-                    <li class="needed-row">
-                        <span class="icon needed" title="needs a choice">⚠</span>
-                        <code>@ambiguous.RawPath</code>
-                        <span class="needed-by">@ambiguous.Candidates.Count possible matches</span>
-                    </li>
-                }
-            </ul>
+            @if (analysis.Missing.Count > 0)
+            {
+                <ul class="needed">
+                    @foreach (MissingReference missing in analysis.Missing)
+                    {
+                        <MissingRow Missing="missing" @key="@($"{missing.RawPath}|{missing.Origin}")" />
+                    }
+                </ul>
+            }
+            @foreach (AmbiguousReference ambiguous in analysis.Ambiguous)
+            {
+                <ConflictPicker Ambiguous="ambiguous" @key="@($"{ambiguous.RawPath}|{ambiguous.Origin}")" />
+            }
         }
     </section>
 }
@@ -64,22 +81,15 @@
     [Parameter]
     public ProjectAnalysis? Analysis { get; set; }
 
-    // The distinct resolved files of the dependency tree, root first, in walk order.
-    private IReadOnlyList<(string Path, bool IsRoot)> ResolvedFiles
-    {
-        get
-        {
-            var files = new List<(string, bool)>();
-            if (Analysis?.Tree is { } tree)
-            {
-                Walk(tree.Root, files, [], []);
-            }
+    /// <summary>The uploaded set, for used/unused classification of the file rows.</summary>
+    [Parameter]
+    public IReadOnlyList<UploadedFile>? Uploads { get; set; }
 
-            return files;
-        }
-    }
+    // Every uploaded file, labelled root / used / unused against the current dependency tree.
+    private IReadOnlyList<ClassifiedFile> Classified =>
+        Analysis is { } analysis ? FileClassifier.Classify(Uploads ?? [], analysis) : [];
 
-    // The distinct font pass-throughs of the dependency tree, in walk order.
+    // The distinct font pass-throughs of the dependency tree, in walk order (fonts are not uploads).
     private IReadOnlyList<string> Fonts
     {
         get
@@ -87,18 +97,14 @@
             var fonts = new List<string>();
             if (Analysis?.Tree is { } tree)
             {
-                Walk(tree.Root, [], fonts, []);
+                CollectFonts(tree.Root, fonts, []);
             }
 
             return fonts;
         }
     }
 
-    private static void Walk(
-        DependencyNode node,
-        List<(string, bool)> files,
-        List<string> fonts,
-        HashSet<string> seen)
+    private static void CollectFonts(DependencyNode node, List<string> fonts, HashSet<string> seen)
     {
         if (node.Origin == ReferenceOrigin.Font)
         {
@@ -112,19 +118,32 @@
 
         if (!node.Resolved)
         {
-            return; // unresolved references are shown in the "Still needed" section
-        }
-
-        if (seen.Add(node.VirtualPath))
-        {
-            files.Add((node.VirtualPath, node.IsRoot));
+            return;
         }
 
         foreach (DependencyNode child in node.Children)
         {
-            Walk(child, files, fonts, seen);
+            CollectFonts(child, fonts, seen);
         }
     }
+
+    private static string UsageClass(FileUsage usage) => usage switch
+    {
+        FileUsage.Root => "root",
+        FileUsage.Unused => "unused",
+        _ => string.Empty,
+    };
+
+    private static string IconClass(FileUsage usage) => usage == FileUsage.Unused ? "muted" : "loaded";
+
+    private static string IconChar(FileUsage usage) => usage == FileUsage.Unused ? "○" : "✓";
+
+    private static string UsageTitle(FileUsage usage) => usage switch
+    {
+        FileUsage.Root => "main file",
+        FileUsage.Used => "loaded",
+        _ => "uploaded but not used by the main file",
+    };
 
     // Strip the synthetic "/proj/" project root for a maker-friendly display name.
     private static string Display(string virtualPath) =>

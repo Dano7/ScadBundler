@@ -54,4 +54,59 @@ public sealed class WorkspaceControllerTests
         Assert.NotNull(controller.Bundle);
         Assert.True(controller.Bundle!.Ok);
     }
+
+    [Fact]
+    public void RootText_ReflectsRoot_AndIsNullWithoutOne()
+    {
+        var controller = new WorkspaceController();
+        Assert.Null(controller.RootText);
+
+        controller.AddOrReplace([new UploadedFile("main.scad", "cube(1);\n")]);
+
+        Assert.Equal("/proj/main.scad", controller.Root);
+        Assert.Equal("cube(1);\n", controller.RootText);
+    }
+
+    [Fact]
+    public void EditMainFile_ReplacesRootText_AndReanalyzes()
+    {
+        var controller = new WorkspaceController();
+        controller.AddOrReplace([new UploadedFile("main.scad", "cube(1);\n")]);
+        Assert.NotNull(controller.Bundle);
+
+        controller.EditMainFile("include <lib.scad>\ncube(1);\n");
+
+        Assert.Equal("include <lib.scad>\ncube(1);\n", controller.RootText);
+        Assert.Contains(controller.Analysis!.Missing, m => m.RawPath == "lib.scad");
+        Assert.Null(controller.Bundle);                 // now blocked on the missing library
+    }
+
+    [Fact]
+    public void EditMainFile_IsNoOp_WithoutARoot()
+    {
+        var controller = new WorkspaceController();
+
+        controller.EditMainFile("cube(1);\n");          // must not throw
+
+        Assert.Null(controller.Analysis);
+    }
+
+    [Fact]
+    public void ResolveAmbiguous_PlacesCandidate_AndClearsAmbiguity()
+    {
+        var controller = new WorkspaceController();
+        controller.AddOrReplace(
+        [
+            new UploadedFile("main.scad", "include <utils.scad>\ncube(1);\n"),
+            new UploadedFile("extra/utils.scad", "a = 1;\n"),
+            new UploadedFile("helpers/utils.scad", "b = 2;\n"),
+        ]);
+        AmbiguousReference ambiguous = Assert.Single(controller.Analysis!.Ambiguous);
+
+        controller.ResolveAmbiguous(ambiguous.Candidates[0], ambiguous.RawPath);
+
+        Assert.Empty(controller.Analysis!.Ambiguous);
+        Assert.NotNull(controller.Bundle);
+        Assert.True(controller.Bundle!.Ok);
+    }
 }

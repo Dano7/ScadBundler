@@ -1,0 +1,44 @@
+@inject IJSRuntime JS
+
+<li class="needed-row drop-target" @ref="_row">
+    <span class="icon needed" title="needed">⚠</span>
+    <div class="needed-body">
+        <div><code>@Missing.RawPath</code> <span class="needed-by">needed by @NeededBy</span></div>
+        <div class="drop-hint">drop <strong>@BaseName</strong> here (or anywhere above)</div>
+    </div>
+</li>
+
+@code {
+    /// <summary>The missing reference this row represents and resolves.</summary>
+    [Parameter, EditorRequired]
+    public MissingReference Missing { get; set; } = default!;
+
+    private ElementReference _row;
+
+    // Each needed row is itself a drop target. It reuses the same scadLive machinery the main drop zone uses:
+    // a drop here dispatches to the (globally stored) DropZone .NET reference, which re-analyzes — basename
+    // inference then resolves the file wherever it landed, so the row need not know which file it expects.
+    // The drop listeners die with the element when the row is removed (no explicit unregister needed).
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            await JS.InvokeVoidAsync("scadLive.registerDropZone", _row);
+        }
+    }
+
+    private string NeededBy => string.Join(", ", Missing.NeededBy.Select(Display));
+
+    private string BaseName
+    {
+        get
+        {
+            string raw = Missing.RawPath.Replace('\\', '/');
+            int slash = raw.LastIndexOf('/');
+            return slash < 0 ? raw : raw[(slash + 1)..];
+        }
+    }
+
+    private static string Display(string virtualPath) =>
+        virtualPath.StartsWith("/proj/", StringComparison.Ordinal) ? virtualPath["/proj/".Length..] : virtualPath;
+}

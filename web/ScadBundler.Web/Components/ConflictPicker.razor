@@ -1,0 +1,97 @@
+@inject WorkspaceController Controller
+
+<div class="conflict">
+    <div class="conflict-q">
+        <code>@Display(FirstNeededBy)</code> needs <code>@Ambiguous.RawPath</code> —
+        which of your @Ambiguous.Candidates.Count files?
+    </div>
+    <div class="conflict-cards">
+        @foreach (string candidate in Ambiguous.Candidates)
+        {
+            <label class="conflict-card @(candidate == _selected ? "selected" : null)">
+                <input type="radio" name="@RadioName" checked="@(candidate == _selected)"
+                       @onchange="@(() => _selected = candidate)" />
+                <span class="conflict-name">@Display(candidate)</span>
+                <span class="conflict-meta">@Meta(candidate)</span>
+            </label>
+        }
+    </div>
+    <div class="conflict-actions">
+        <button type="button" @onclick="UsePicked" disabled="@(_selected is null)">Use this file</button>
+        <span class="conflict-or">…or place it at:</span>
+        <input class="conflict-path" @bind="_path" @bind:event="oninput" placeholder="e.g. BOSL2/std.scad" />
+        <button type="button" @onclick="UseAtPath" disabled="@(_selected is null || string.IsNullOrWhiteSpace(_path))">
+            Set path
+        </button>
+    </div>
+</div>
+
+@code {
+    /// <summary>The ambiguous reference (basename matched by ≥2 uploads) this picker resolves.</summary>
+    [Parameter, EditorRequired]
+    public AmbiguousReference Ambiguous { get; set; } = default!;
+
+    private string? _selected;
+    private string _path = string.Empty;
+
+    private string RadioName => "conflict-" + Ambiguous.RawPath;
+
+    private string FirstNeededBy => Ambiguous.NeededBy.Count > 0 ? Ambiguous.NeededBy[0] : Ambiguous.RawPath;
+
+    protected override void OnParametersSet()
+    {
+        // Default the selection to the first candidate and seed the path field with the written reference,
+        // which the user can override to a sub-path (e.g. BOSL2/std.scad).
+        if (_selected is null || !Ambiguous.Candidates.Contains(_selected, StringComparer.Ordinal))
+        {
+            _selected = Ambiguous.Candidates.Count > 0 ? Ambiguous.Candidates[0] : null;
+        }
+
+        if (_path.Length == 0)
+        {
+            _path = Ambiguous.RawPath;
+        }
+    }
+
+    // Place the selected file at the reference exactly as written.
+    private void UsePicked()
+    {
+        if (_selected is { } candidate)
+        {
+            Controller.ResolveAmbiguous(candidate, Ambiguous.RawPath);
+        }
+    }
+
+    // Place the selected file at a user-typed sub-path.
+    private void UseAtPath()
+    {
+        if (_selected is { } candidate && !string.IsNullOrWhiteSpace(_path))
+        {
+            Controller.ResolveAmbiguous(candidate, _path.Trim());
+        }
+    }
+
+    // "<n> chars · <first non-blank line>" so the user can tell two same-named files apart.
+    private string Meta(string candidate)
+    {
+        string? text = Controller.TextForVirtualPath(candidate);
+        if (text is null)
+        {
+            return string.Empty;
+        }
+
+        string snippet = text
+            .Split('\n')
+            .Select(line => line.Trim())
+            .FirstOrDefault(line => line.Length > 0) ?? string.Empty;
+        if (snippet.Length > 48)
+        {
+            snippet = snippet[..48] + "…";
+        }
+
+        return snippet.Length > 0 ? $"{text.Length} chars · {snippet}" : $"{text.Length} chars";
+    }
+
+    private static string Display(string virtualPath) =>
+        virtualPath.StartsWith("/proj/", StringComparison.Ordinal) ? virtualPath["/proj/".Length..] : virtualPath;
+}

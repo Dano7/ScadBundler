@@ -1,0 +1,65 @@
+@if (Rows.Count > 0)
+{
+    <section class="problems">
+        <h2>Problems</h2>
+        <ul class="problem-list">
+            @foreach (DiagnosticDto d in Rows)
+            {
+                <li class="problem @SeverityClass(d.Severity)">
+                    <span class="problem-sev" title="@d.Severity">@SeverityIcon(d.Severity)</span>
+                    <div class="problem-body">
+                        <div class="problem-loc"><code>@Location(d)</code> — @d.Message</div>
+                        @if (FriendlyDiagnostics.Explain(d.Code) is { } friendly)
+                        {
+                            <div class="problem-friendly">@friendly</div>
+                        }
+                    </div>
+                </li>
+            }
+        </ul>
+    </section>
+}
+
+@code {
+    /// <summary>The diagnostics to display; <c>null</c>/empty renders nothing.</summary>
+    [Parameter]
+    public IReadOnlyList<DiagnosticDto>? Diagnostics { get; set; }
+
+    // SB4001 (missing include/use) is the file list's ⚠ rows, never a "problem" — the facade already
+    // filters it, but we filter again defensively so a different source can never reintroduce it here.
+    // Ordered Error → Warning → Info so the most serious issues read first.
+    private IReadOnlyList<DiagnosticDto> Rows =>
+        Diagnostics is null
+            ? []
+            : [.. Diagnostics
+                .Where(d => d.Code != "SB4001")
+                .OrderBy(d => SeverityRank(d.Severity))];
+
+    private static int SeverityRank(string severity) => severity switch
+    {
+        "Error" => 0,
+        "Warning" => 1,
+        _ => 2,
+    };
+
+    private static string SeverityClass(string severity) => severity switch
+    {
+        "Error" => "sev-error",
+        "Warning" => "sev-warning",
+        _ => "sev-info",
+    };
+
+    private static string SeverityIcon(string severity) => severity switch
+    {
+        "Error" => "✕",
+        "Warning" => "⚠",
+        _ => "ℹ",
+    };
+
+    // "file : line : col", with the synthetic /proj/ root stripped for a friendly name.
+    private static string Location(DiagnosticDto d)
+    {
+        string file = d.File.StartsWith("/proj/", StringComparison.Ordinal) ? d.File["/proj/".Length..] : d.File;
+        return $"{file} : {d.Line} : {d.Column}";
+    }
+}
