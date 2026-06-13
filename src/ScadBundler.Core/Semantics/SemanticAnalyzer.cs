@@ -8,14 +8,14 @@ namespace ScadBundler.Core.Semantics;
 /// <summary>
 /// Builds symbol tables and resolves every reference under OpenSCAD's scoping rules, producing the
 /// <see cref="ISemanticModel"/> the Slice 5 inliner consumes, plus semantic validation diagnostics
-/// (SB3001–SB3005). The analyzer <b>never throws</b> — every problem is a diagnostic.
+/// (SB3002–SB3005). The analyzer <b>never throws</b> — every problem is a diagnostic.
 /// </summary>
 /// <remarks>
 /// Two passes over the load graph: pass 1 records each file's top-level declarations (flagging
 /// within-scope duplicates, SB3003/SB3004); pass 2 walks each file in <i>its own</i> environment
 /// (own + <c>include</c>-merged declarations for lookups; own <c>use</c>d libraries for calls,
-/// last-<c>use</c>-wins), binding references to symbols and validating member access (SB3001),
-/// comprehension position (SB3002), and unknown references (SB3005). Scoping/lookup order mirrors
+/// last-<c>use</c>-wins), binding references to symbols and validating comprehension position
+/// (SB3002) and unknown references (SB3005). Scoping/lookup order mirrors
 /// <c>ScopeContext.cc</c>/<c>Context.cc</c>: own scope → built-ins → used libraries.
 /// </remarks>
 public sealed class SemanticAnalyzer
@@ -421,8 +421,11 @@ public sealed class SemanticAnalyzer
                 break;
 
             case MemberExpression member:
+                // Member validity is a runtime concern in OpenSCAD (vectors expose .x/.y/.z, ranges
+                // .begin/.step/.end, objects from textmetrics()/fontmetrics() arbitrary members);
+                // the grammar accepts any `.ident` and an unmatched member yields `undef`, never a
+                // compile-time error. We can't know the target's type statically, so we don't judge.
                 ResolveExpression(member.Target, comprehensionAllowed: false);
-                ValidateMember(member);
                 break;
 
             case FunctionCallExpression call:
@@ -738,23 +741,6 @@ public sealed class SemanticAnalyzer
 
             edges.Add(symbol);
         }
-    }
-
-    private void ValidateMember(MemberExpression member)
-    {
-        if (member.Member.Length == 0 || member.Member is "x" or "y" or "z")
-        {
-            return; // valid component, or an empty name from parser recovery (already diagnosed)
-        }
-
-        // Point at the member name itself (after the dot), not the whole access expression.
-        SourcePosition end = member.Span.End;
-        var start = new SourcePosition(
-            end.Offset - member.Member.Length, end.Line, end.Column - member.Member.Length);
-        _diagnostics.Error(
-            DiagnosticCode.InvalidMemberAccess,
-            $"Invalid member '.{member.Member}'; only .x, .y, and .z are valid vector components.",
-            new SourceSpan(member.Span.File, start, end));
     }
 
     private void GuardComprehension(string keyword, bool comprehensionAllowed, SourceSpan span)
