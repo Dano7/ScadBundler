@@ -8,28 +8,110 @@ should be able to resume from here with no other context.
 
 ## ▶ Next session — start here
 
-**W0 + W1 are done, green, and committed.** Build **W2 — Dependency UX & friendly errors**
-([slices/Slice-W2-Dependency-UX.md](slices/Slice-W2-Dependency-UX.md)). W1 stood up the shell + happy-path
-bundle; W2 makes the page **smart and forgiving**. Build order remaining: **W2 → W3** (W4 deferred — do not
-build).
+**W0 + W1 + W2 are done, green, and committed.** Build **W3 — Options, Polish & Deploy**
+([slices/Slice-W3-Options-Polish-Deploy.md](slices/Slice-W3-Options-Polish-Deploy.md)) — the shipping
+slice. W4 (openscad-wasm preview) stays **deferred — do not build**.
 
-First things for W2 (the controller + facade already expose everything you need):
-- **Missing-reference drop targets** (`MissingRow`): render one ⚠ row per `ProjectAnalysis.Missing` with
-  its `NeededBy`; dropping the file anywhere re-analyzes (the existing `DropZone.Ingest` path already
-  feeds `WorkspaceController.AddOrReplace`).
-- **Entry-point override**: when `InferredRoot` is `null`, list `EntryPointCandidates` and call
-  `WorkspaceController.SetRoot(virtualPath)` on click (already implemented on the controller). Add a
-  "★ main" re-designate affordance on every file row.
-- **`MainFileEditor`**: debounced `<textarea>` → add `WorkspaceController.EditMainFile(newText)` (NOT yet
-  on the controller — deferred from W1; it replaces the root upload and re-analyzes). The current
-  `AddOrReplace` keys by `UploadedFile.Name`, so "edit" = re-add the root's `Name` with new text.
-- **`ProblemsPanel`** with the UI-only friendly-code map (Slice-W2 §3); SB4001 is already filtered out of
-  `ProjectAnalysis.Diagnostics` — do not reintroduce it.
-- **`StructureTree`** (read-only) + **`ConflictPicker`** for `ProjectAnalysis.Ambiguous` (re-add the chosen
-  file with `Name = rawPath`).
+**Hosting decision is made: GitHub Pages** (the owner chose it on 2026-06-12). Design §5 and Slice-W3 §2.3
+record the GH-Pages specifics — implement them in W3: a GitHub Actions → Pages workflow on push to `main`
+that runs `dotnet publish -c Release`, **rewrites `<base href>` from `"/"` to the repo sub-path `/<repo>/`**
+(in [wwwroot/index.html](../../web/ScadBundler.Web/wwwroot/index.html)), writes a `404.html` (= `index.html`)
+SPA fallback and a `.nojekyll` marker (so `_framework/` is served), then deploys the artifact. Pages serves
+**gzip, not negotiated Brotli**, so lean on IL trimming for payload.
 
-> Ask the user before deciding the **W3 hosting target** and before adding **any** dependency to
-> `ScadBundler.Core`.
+First things for W3 (the facade option mapping is fully built; this slice is UI + parity + deploy):
+- **`OptionsPanel`** (collapsed): the provenance checkbox, Normal/Minify/Obfuscate radio (+ the "credit
+  stays" tooltip), and the Advanced sub-section (collision strategy, strip-license, keep-comments). Each
+  control builds a new `WebBundleOptions` and calls `WorkspaceController.SetOptions` (already wired) → live
+  re-bundle. **Mirror `BundleCommand` exactly** — parity is sacred (extend the W0 parity fixtures with
+  option permutations).
+- **Polish**: responsive single-column reflow, a11y (keyboard-operable drop zone — a real
+  `<input type=file>` fallback, focus states, ARIA on the status icons + problems list), and the
+  empty/incomplete/error/success states. The stats line can surface renamed/removed counts when a profile
+  ran (`BundleStats` already carries `Renames`/`DefinitionsRemoved`).
+- **README**: point the root [README.md](../../README.md) companion link at the live URL once deployed.
+
+> Before adding **any** dependency to `ScadBundler.Core`, stop and ask (Core stays dependency-free).
+
+---
+
+## Slice W2 — done (2026-06-12)
+
+**Dependency UX & friendly errors.** The page is now smart and forgiving: missing libraries are listed
+(with "needed by") as drop targets, the entry point can be picked/re-designated, the main file is editable
+inline with live re-analysis, used/unused files are highlighted, a friendly problems panel explains real
+syntax/semantic issues (never SB4001), a read-only structure tree shows the resolved layout, and basename
+conflicts get a one-click picker. **Core untouched; no Core dependency added; no new `SBxxxx` codes.**
+
+### Controller intents added (`web/ScadBundler.Web/State/WorkspaceController.cs`)
+- `EditMainFile(newText)` — replaces the **current root's** upload text in place (maps `Root`’s canonical
+  `/proj/…` path back to the keyed `UploadedFile.Name`) and re-analyzes. No-op without a root.
+- `ResolveAmbiguous(candidateVirtualPath, asPath)` — re-adds the picked candidate's content under `asPath`
+  via the existing `AddOrReplace` (no new facade call), clearing the ambiguity next analysis.
+- `RootText` (get) — the current root's text, the `MainFileEditor` seed. `TextForVirtualPath(path)` — a
+  candidate's text for the picker's size/snippet. Both use one private `NameForCanonical` reverse-map.
+- These are **controller** conveniences, not new facade methods (Design §3.2 updated to list them).
+
+### Files added (`web/ScadBundler.Web/`)
+- `State/FileClassifier.cs` — pure `Classify(uploads, analysis) → ClassifiedFile[]` partition into
+  **Root / Used / Unused** (`FileUsage`). Used = resolved tree paths; matched exact **or case-insensitively
+  on the full path** so a basename-aliased file (e.g. uploaded `MyLib.scad` referenced `<mylib.scad>`)
+  still counts as used. Unit-tested directly (no browser).
+- `Components/FriendlyDiagnostics.cs` — the UI-only `SBnnnn → one sentence` map (Slice §3); unknown code ⇒
+  no extra line (raw message only).
+- `Components/ProblemsPanel.razor` — non-missing diagnostics grouped Error→Warning→Info, each
+  `file : line : col` + message + friendly line; **re-filters SB4001 defensively**.
+- `Components/MissingRow.razor` — one ⚠ row per `Missing` (RawPath + "needed by" + a drop hint). It is its
+  own drop target via `scadLive.registerDropZone(element)`, which dispatches to the **global** DropZone
+  `.NET` ref (set in `scadLive.init`) → `AddOrReplace` → re-analyze. No per-row `[JSInvokable]`; listeners
+  die with the element (no unregister needed).
+- `Components/StructureTree.razor` — **read-only** folder tree built from the upload `Name`s (recursive
+  `RenderFragment`). No inputs/buttons (asserted in tests) — structure comes from the upload, never edited.
+- `Components/ConflictPicker.razor` — per `AmbiguousReference`: radio-selectable candidate cards
+  (size · first-line snippet) + a "Use this file" button (place at the written path) + an inline
+  "…or place it at:" field (place the selected candidate at a typed sub-path). Both call
+  `Controller.ResolveAmbiguous`.
+- `Components/MainFileEditor.razor` — debounced `<textarea>` (params `Root`, `RootText`, `DebounceMs`=200;
+  `CancellationTokenSource` + `Task.Delay`). Reloads only when the root **file** changes (param compare in
+  `OnParametersSet`), so re-analysis never clobbers in-progress typing.
+
+### Files changed
+- `Components/FileList.razor` — **reworked**: now injects `WorkspaceController` (for `SetRoot`) and takes
+  `Analysis` + `Uploads` params. Shows the entry-point candidate picker when `Root` is null ("Which file is
+  your model?"), the **classified** file rows (★ main badge on the root; a "★ make main" link on every
+  other row; ✓ used / ○ unused with an "unused" tag), font ⓕ rows, and hosts `MissingRow` + `ConflictPicker`
+  under "Still needed".
+- `App.razor` — composes `StructureTree` → `FileList` → `MainFileEditor` → still-need line → `ProblemsPanel`
+  → `OutputPanel`; passes `Root`/`RootText`/`Uploads`; diagnostics source = `Bundle?.Diagnostics ??
+  Analysis?.Diagnostics`.
+- `wwwroot/css/app.css` — styles for unused rows, make-main links, drop-target rows, conflict picker,
+  structure tree, editor, problems panel.
+
+### Quality / verification
+- **Build: 0 warnings.** **Tests: 783 green** (Core 691, CLI 23, Integration 34, **Web 35** [+20]).
+- New web tests: `FileClassifierTests` (pure), `ProblemsPanelTests`, `MissingRow`/re-root/unused/ambiguous
+  in `FileListTests`, `MainFileEditorTests`, `ConflictPickerTests`, `StructureTreeTests`, and
+  `WorkspaceControllerTests` (`RootText`/`EditMainFile`/`ResolveAmbiguous`). All driven by the **real**
+  `ProjectAnalyzer`, so rendering matches the live app.
+- **App boots:** `dotnet run --project web/ScadBundler.Web --urls http://localhost:5219` serves the shell +
+  `_framework/blazor.webassembly.js` + `interop.js` + `ScadBundler.Web.wasm` (all 200).
+
+### Gotchas the next session must know
+- **`MainFileEditor` debounce is a real timer.** Its bUnit test uses `DebounceMs:1` + a 10 s
+  `WaitForAssertion` window because this assembly can run alongside the CPU-heavy OpenSCAD integration
+  suite; a tighter window flaked once under that contention. Keep the generous window if you touch it.
+- **`WorkspaceController` dedupes uploads by `Name`** (a `Dictionary`), so two *bare* same-name loose files
+  can't coexist there — they collapse (last wins) before any ambiguity arises. `AmbiguousReference` is thus
+  reachable via the controller only from **distinct-Name, same-basename** uploads (e.g. `extra/utils.scad`
+  + `helpers/utils.scad` with a bare `<utils.scad>` reference) — which is what `ConflictPickerTests` and
+  the W2 `WorkspaceControllerTests` use. (The W0 facade still handles the raw two-`UploadedFile` list.)
+- **Used/unused classification limitation:** a loose upload aliased to a **different sub-path** (e.g.
+  `std.scad` referenced `<BOSL2/std.scad>`) is matched used only by exact/ci full path, so it can show as
+  "unused" even though its content is inlined. Rare (folder/zip uploads place verbatim, no alias); revisit
+  only if it bites. The bundle itself is unaffected.
+- **`MissingRow` reuses the global DropZone ref** — it has no `[JSInvokable]` of its own. If you ever make
+  drops on a missing row resolve a *specific* reference (rather than re-analyze-everything), you'll need a
+  per-row callback; today "drop anywhere → basename inference resolves it" is intentional.
 
 ---
 

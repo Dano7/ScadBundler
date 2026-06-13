@@ -1,0 +1,61 @@
+@if (Uploads is { Count: > 0 })
+{
+    <section class="structure">
+        <h2>Project layout</h2>
+        <p class="structure-note">How your files resolved. This view is read-only — structure comes from how
+            you uploaded (folder, <code>.zip</code>, or loose files), not from editing here.</p>
+        @RenderNode(Build())
+    </section>
+}
+
+@code {
+    /// <summary>The uploaded files whose virtual layout to show; <c>null</c>/empty renders nothing.</summary>
+    [Parameter]
+    public IReadOnlyList<UploadedFile>? Uploads { get; set; }
+
+    private sealed class Node
+    {
+        public SortedDictionary<string, Node> Dirs { get; } = new(StringComparer.Ordinal);
+
+        public SortedSet<string> Files { get; } = new(StringComparer.Ordinal);
+    }
+
+    // Build a folder tree from the upload Names (e.g. "BOSL2/std.scad" → BOSL2 ▸ std.scad).
+    private Node Build()
+    {
+        var root = new Node();
+        foreach (UploadedFile upload in Uploads!)
+        {
+            string[] parts = upload.Name.Replace('\\', '/').Split('/', StringSplitOptions.RemoveEmptyEntries);
+            Node current = root;
+            for (int i = 0; i < parts.Length - 1; i++)
+            {
+                if (!current.Dirs.TryGetValue(parts[i], out Node? child))
+                {
+                    child = new Node();
+                    current.Dirs[parts[i]] = child;
+                }
+
+                current = child;
+            }
+
+            if (parts.Length > 0)
+            {
+                current.Files.Add(parts[^1]);
+            }
+        }
+
+        return root;
+    }
+
+    private RenderFragment RenderNode(Node node) => @<ul class="tree">
+        @foreach (KeyValuePair<string, Node> dir in node.Dirs)
+        {
+            <li class="tree-dir"><span class="tree-folder">📁 @dir.Key</span>@RenderNode(dir.Value)</li>
+        }
+        @foreach (string file in node.Files)
+        {
+            <li class="tree-file">📄 @file</li>
+        }
+    </ul>;
+}

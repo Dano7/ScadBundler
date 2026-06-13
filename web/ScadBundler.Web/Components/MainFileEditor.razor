@@ -1,0 +1,75 @@
+@implements IDisposable
+@inject WorkspaceController Controller
+
+@if (Root is not null)
+{
+    <section class="editor">
+        <div class="editor-header">
+            <h2>Main file</h2>
+            <span class="editor-note">Editing <code>@Display(Root)</code> — changes re-bundle automatically.</span>
+        </div>
+        <textarea class="editor-text" rows="12" spellcheck="false" value="@_text" @oninput="OnInput"></textarea>
+    </section>
+}
+
+@code {
+    /// <summary>The current root's canonical virtual path; a change here reloads the textarea.</summary>
+    [Parameter]
+    public string? Root { get; set; }
+
+    /// <summary>The current root file's text (the textarea seed).</summary>
+    [Parameter]
+    public string? RootText { get; set; }
+
+    /// <summary>The debounce window (ms) before an edit re-analyzes; small in tests.</summary>
+    [Parameter]
+    public int DebounceMs { get; set; } = 200;
+
+    private string _text = string.Empty;
+    private string? _boundRoot;
+    private CancellationTokenSource? _debounce;
+
+    protected override void OnParametersSet()
+    {
+        // Reload the textarea only when the root *file* changes (a promote/replace), never on our own edits:
+        // re-analyzing leaves Root unchanged, so the user's in-progress text is preserved.
+        if (!string.Equals(Root, _boundRoot, StringComparison.Ordinal))
+        {
+            _boundRoot = Root;
+            _text = RootText ?? string.Empty;
+        }
+    }
+
+    private void OnInput(ChangeEventArgs e)
+    {
+        _text = e.Value?.ToString() ?? string.Empty;
+        _debounce?.Cancel();
+        _debounce?.Dispose();
+        _debounce = new CancellationTokenSource();
+        _ = DebouncedCommitAsync(_debounce.Token);
+    }
+
+    // Wait out the debounce window, then push the edit to the controller (which re-analyzes + re-bundles).
+    private async Task DebouncedCommitAsync(CancellationToken token)
+    {
+        try
+        {
+            await Task.Delay(DebounceMs, token);
+        }
+        catch (TaskCanceledException)
+        {
+            return; // superseded by a later keystroke
+        }
+
+        await InvokeAsync(() => Controller.EditMainFile(_text));
+    }
+
+    private static string Display(string virtualPath) =>
+        virtualPath.StartsWith("/proj/", StringComparison.Ordinal) ? virtualPath["/proj/".Length..] : virtualPath;
+
+    public void Dispose()
+    {
+        _debounce?.Cancel();
+        _debounce?.Dispose();
+    }
+}

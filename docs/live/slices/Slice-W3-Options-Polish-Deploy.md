@@ -56,9 +56,11 @@ update. The mapping must produce the **same bytes** as the equivalent CLI invoca
 
 - `dotnet publish web/ScadBundler.Web -c Release` → static `wwwroot/` with **trimming** + **Brotli** +
   invariant globalization (Design §5). Verify payload size and first-interaction time.
-- A **CI workflow** publishing on push (host chosen with the owner — GitHub Pages / Cloudflare / Azure
-  SWA): base-href for sub-path hosting, SPA fallback to `index.html`, correct `.wasm`/`.br` MIME +
-  long-cache headers.
+- A **CI workflow** publishing on push to **GitHub Pages** (host decided 2026-06-12 — see
+  [../Design.md](../Design.md) §5): a GitHub Actions job runs `dotnet publish`, rewrites `<base href>` to
+  the repo sub-path (`/<repo>/`), writes a `404.html` (= `index.html`) SPA fallback and a `.nojekyll`
+  marker, then deploys the artifact to Pages. (Pages serves gzip, not negotiated Brotli, so lean on
+  trimming for payload.)
 - Update the docs landing [README.md](../../README.md) companion link (already points at this `live/`
   package — swap in the live URL once deployed) + a one-line "or use the web version" pointer.
 

@@ -86,14 +86,17 @@ public sealed class WorkspaceController
     public WebBundleResult? Bundle { get; }
     public WebBundleOptions Options { get; private set; }
     public string? Root { get; private set; }          // user override or inferred
+    public string? RootText { get; }                    // current root's text (MainFileEditor seed; W2)
     public event Action? Changed;                       // components subscribe → StateHasChanged
 
     // intents (each runs Recompute() then fires Changed)
     public void AddOrReplace(IEnumerable<UploadedFile> files);
     public void Remove(string virtualPath);
     public void SetRoot(string virtualPath);
-    public void EditMainFile(string newText);           // debounced by the caller (~200 ms)
+    public void EditMainFile(string newText);           // debounced by the caller (~200 ms); W2
+    public void ResolveAmbiguous(string candidate, string asPath); // ConflictPicker → re-add via AddOrReplace; W2
     public void SetOptions(WebBundleOptions options);
+    public string? TextForVirtualPath(string virtualPath);         // candidate text for the picker; W2
 
     // Recompute: (fs, Analysis) = ProjectAnalyzer.Analyze(Uploads, Root);
     //            Root = Analysis.Root;
@@ -150,10 +153,13 @@ No JS UI framework, no bundler toolchain beyond what the .NET SDK provides.
 
 ---
 
-## 5. Hosting & deploy (host chosen later)
+## 5. Hosting & deploy — **GitHub Pages** (decided 2026-06-12)
 
 The output of `dotnet publish web/ScadBundler.Web -c Release` is a **static `wwwroot/`** — deployable to
-any static host. Plan generically; pick the host in [Slice-W3](slices/Slice-W3-Options-Polish-Deploy.md):
+any static host. The owner chose **GitHub Pages** (free, already where the repo lives, no extra accounts).
+The generic plan below still holds; the GitHub-Pages-specific work (base-href for the project sub-path, a
+`404.html` SPA fallback, `.nojekyll`, and a GitHub Actions → Pages workflow) is implemented in
+[Slice-W3](slices/Slice-W3-Options-Polish-Deploy.md):
 
 - **Publish settings:** IL **trimming** on (shrinks the assembly payload), **Brotli** precompression
   (Blazor emits `.br`), invariant globalization where possible (drops ICU weight). AOT is **not** needed —
@@ -162,9 +168,11 @@ any static host. Plan generically; pick the host in [Slice-W3](slices/Slice-W3-O
 - **First paint vs. runtime:** `index.html` renders the shell + blurb immediately; the WASM runtime
   streams behind it; the drop zone enables on `ready`. (Blazor's loading UI is replaced with the branded
   shell.)
-- **Host specifics (deferred):** base-href handling for project sub-paths (GitHub Pages), SPA fallback to
-  `index.html`, correct `.br`/`.wasm` MIME + long-cache headers, and a CI workflow (GitHub Actions →
-  Pages, or the host's Git integration). Decide with the owner at W3.
+- **Host specifics (GitHub Pages, built in W3):** rewrite `<base href>` to the project sub-path
+  (`/<repo>/`) at publish (a user-project page serves under `https://<user>.github.io/<repo>/`); add a
+  `404.html` copy of `index.html` for SPA deep-link fallback and a `.nojekyll` marker so the `_framework`
+  folder is served; rely on Pages' default gzip (Brotli static `.br` is not negotiated by Pages, so size
+  budgeting leans on trimming + gzip); publish via a **GitHub Actions → Pages** workflow on push to `main`.
 
 ---
 
