@@ -10,9 +10,14 @@ namespace ScadBundler.Core.Transforming;
 /// OpenSCAD has no dynamic dispatch of module/function names, so static reachability is sound;
 /// unreachable definitions instantiate nothing (no CSG, no <c>echo</c>), and definitions do not execute
 /// at definition time, so dropping an unreferenced one drops no side effect. Roots that seed reachability
-/// (and are always kept): every executed top-level statement, the Customizer prologue, and any assignment
+/// (and are always kept): every executed top-level statement, the Customizer prologue, any assignment
 /// whose right-hand side contains an <c>echo</c>/<c>assert</c> (those fire at top-level evaluation, and
-/// the harness compares <c>ECHO:</c> output).
+/// the harness compares <c>ECHO:</c> output), and every <b><c>$</c>-special-variable assignment</b>.
+/// A top-level <c>$foo = …</c> establishes a <i>dynamically-scoped</i> default that any module reached at
+/// render time may read; those reads resolve to no symbol in the static model (special variables are not
+/// lexically bound), so the mark-and-sweep can never see the edge and would wrongly drop the default —
+/// breaking, e.g., BOSL2's <c>$tags_shown = "ALL"</c> / <c>$transform = IDENT</c> attachment globals.
+/// Special-variable assignments are therefore always kept (we cannot prove a dynamic read absent).
 /// </summary>
 internal sealed class DeadCodeElimination : IBundleTransform
 {
@@ -34,7 +39,12 @@ internal sealed class DeadCodeElimination : IBundleTransform
             bool isRemovable = statement switch
             {
                 ModuleDefinition or FunctionDefinition => true,
-                AssignmentStatement assignment => !prologue.Contains(assignment) && !HasSideEffect(assignment.Value),
+                // A `$`-special-variable default is read through dynamic scope, which the static reference
+                // model can't see — never tree-shake it (it would drop a default a render-time read needs).
+                AssignmentStatement assignment =>
+                    !prologue.Contains(assignment)
+                    && !Builtins.IsSpecialVariable(assignment.Name)
+                    && !HasSideEffect(assignment.Value),
                 _ => false,
             };
 

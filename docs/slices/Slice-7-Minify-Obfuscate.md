@@ -183,14 +183,25 @@ a differential-harness fixture* (§9) before the transform ships — never assum
   **root**, and top-level assignments that are unreferenced **and** side-effect-free.
 - **Roots** (must be kept; seed reachability from these): every executed top-level statement
   (`ModuleInstantiation`, `If/For/IntersectionFor/Let` statements, `BlockStatement`, top-level `echo`/
-  `assert` calls), **and every Customizer prologue assignment** (a knob is user-facing even if unread).
+  `assert` calls), **every Customizer prologue assignment** (a knob is user-facing even if unread), **and
+  every `$`-special-variable assignment** (see below).
 - **Removable assignment rule.** Drop a top-level `AssignmentStatement` only if (a) its name has zero
-  references after DCE of definitions, **and** (b) its RHS subtree contains **no** `EchoExpression`/
-  `AssertExpression` (those fire at top-level evaluation and the harness compares `ECHO:`). Never drop a
-  prologue/`Protected` assignment.
+  references after DCE of definitions, (b) its RHS subtree contains **no** `EchoExpression`/
+  `AssertExpression` (those fire at top-level evaluation and the harness compares `ECHO:`), **and (c) its
+  name is not a `$`-special variable**. Never drop a prologue/`Protected` assignment.
+- **Special variables are never tree-shaken** (`Builtins.IsSpecialVariable`). A top-level `$foo = …`
+  establishes a **dynamically-scoped** default that any module reached at render time may read off the call
+  stack. Those reads bind to *no* symbol in the static model (special variables are not lexically scoped),
+  so the mark-and-sweep can never observe the edge and would wrongly drop the default — leaving the dynamic
+  read `undef`. This silently broke real BOSL2 projects under `--minify`/`--obfuscate` (the
+  `$tags_shown = "ALL"` / `$transform = IDENT` / `$parent_gear_*` attachment globals vanished, so an
+  attachment `assert` failed). We cannot prove a dynamic read absent, so the assignment is always kept.
+  Covered by the `T-001-harden` differential fixture (a `$ribs` default read through a module loop).
 - **Safe.** OpenSCAD has no string/dynamic dispatch of module or function names (no `eval`), so static
-  reachability is sound; unreachable definitions instantiate nothing → no CSG, no echo. Definitions do not
-  execute at definition time (only at call), so removing an unreferenced one drops no side effect.
+  reachability of definitions is sound; unreachable definitions instantiate nothing → no CSG, no echo.
+  Definitions do not execute at definition time (only at call), so removing an unreferenced one drops no
+  side effect. The special-variable exception above closes the one case where a *value* read is invisible
+  to the static model.
 - **Reuses.** `ISemanticModel` references + the `PrivateConstants` reachability shape already built for
   `use` imports.
 
