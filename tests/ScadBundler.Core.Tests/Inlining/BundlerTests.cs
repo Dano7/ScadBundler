@@ -51,6 +51,20 @@ public sealed class BundlerTests
     }
 
     [Fact]
+    public void Bundle_WithinFileRedefinition_ReportsRedefinedOnce_NotPerStage()
+    {
+        using var temp = new TempProject();
+        temp.Write("main.scad", "function f(x) = x + 1;\nfunction f(x) = x + 2;\necho(f(1));");
+
+        BundleResult result = Bundler.Bundle(temp.At("main.scad"), new BundleOptions([]));
+
+        // The semantic pass (within-file scope) and the inliner (merged-set collision) both detect the
+        // same redefinition with an identical code/span/message; the bundler collapses the duplicate so
+        // it surfaces once, not once per stage.
+        Assert.Equal(1, result.Diagnostics.Count(d => d.Code == DiagnosticCode.DefinitionRedefined));
+    }
+
+    [Fact]
     public void Bundle_MissingRoot_NeverThrows()
     {
         using var temp = new TempProject();

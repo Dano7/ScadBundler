@@ -6,10 +6,18 @@ You are picking up **ScadBundler**, an AST-based OpenSCAD file bundler (C# / .NE
 
 ## ▶ Next session — start here
 
+**The recursive-`function`-literal task is DONE** (branch `recursive-anonymous-function-literal`), and so
+are two further real-world fixes found while differentially bundling
+`C:\git\hub\ParametricCompoundPlanetary.scad` (BOSL2) against the official binary — see **"Done this
+session (2026-06-14)"** below. The bundle of that file now renders **byte-identical CSG** to OpenSCAD's
+read of the original (zero stderr on both sides). No specific next task is queued; pick from "Other
+post-v1 work". Residual BOSL2 warnings that remain are intentional/expected (catalogued in the 06-14
+entry).
+
+<details><summary>Original task brief (now completed) — kept for context</summary>
+
 **TASK: resolve recursive / forward / mutual references inside anonymous `function` literals.**
-Branch off **`SB3005-sibling-include-scope`** (current branch; holds the SB3001 retirement + the SB3005
-island-resolution fix — see "Done this session (2026-06-13)"). This is the last real analyzer gap from
-the SB3005 work: it accounts for ~4 of the residual 72 SB3005 warnings when bundling BOSL2.
+This was the last real analyzer gap from the SB3005 work.
 
 When an anonymous `function` literal references a name *from inside its own body* that is a sibling
 binding of the enclosing `let`/`for`/comprehension group (including its own binding — recursion), the
@@ -108,9 +116,73 @@ variable holding a function literal called as a function (not in BOSL2's residua
 `ResolveFunctionCall` to fall back to the variable table, and unlike a local that *is* a renameable
 symbol, so check inliner fallout + add a test).
 
+</details>
+
 ---
 
-### Other post-v1 work (after the task above, or instead)
+### Done this session (2026-06-14) — recursive `function` literals + two BOSL2 differential fixes (branch `recursive-anonymous-function-literal`)
+
+Driven by differentially bundling `C:\git\hub\ParametricCompoundPlanetary.scad` (`include
+<BOSL2/std.scad>` + `<BOSL2/gears.scad>`) against the official binary. **Result: the bundle renders
+byte-identical CSG to OpenSCAD's read of the original, zero stderr on both sides.** Full suite green
+(**Core 712, CLI 23, Integration 35, Web 45**), 0 warnings. New integration fixture
+`tests/Corpus/integration/V-004-builtin-override` rides the differential harness (V4).
+
+1. **Recursive/forward/mutual `function`-literal references (the queued task).**
+   [SemanticAnalyzer.cs](src/ScadBundler.Core/Semantics/SemanticAnalyzer.cs) `ResolveBindings` now defers
+   every function literal in a binding group and resolves its body **after** all the group's names are in
+   the frame (closures resolve lazily), so `let(f = function(n) … f(n-1)) …` and forward/mutual variants
+   no longer mis-warn SB3005. Implemented with a **snapshot** of the scope chain at each literal's
+   definition site (`_deferredLiterals`), not the simpler stack the old brief suggested: the snapshot
+   restores any *intervening* inner scope (e.g. a literal that closes over a `for`-comprehension variable
+   inside the binding value) at deferred-resolution time — the naïve stack would have **regressed** that
+   case. Eager initializers still warn (`let(w = w+1)` guard kept). 7 tests in `SemanticResolutionTests`.
+   Confirmed `strip_left|bcs|binsearch_fn|randang` are gone from the BOSL2 bundle.
+
+2. **Builtin-override infinite recursion (the bug that BLOCKED rendering the bundle at all).** BOSL2's
+   `builtins.scad` captures OpenSCAD builtins behind `use`d wrappers (`module _translate(v) translate(v)
+   children();`, where `translate` = the builtin because `use` isolates the file's `FileContext`); its
+   `transforms.scad` then **overrides** `translate`/`rotate`/`scale`/`multmatrix`/`cube`/`cylinder`/
+   `sphere`/`square`/`circle`/`text`, delegating to the wrapper. Flattening drops the wrapper next to the
+   override in one flat scope, so the wrapper's bare `translate` binds to the override → **infinite
+   recursion** (`ERROR: Recursion detected calling function 'is_finite'`, empty CSG). OpenSCAD has no
+   syntax to name a shadowed builtin, so the fix **frees the name**: new
+   [Inliner.cs](src/ScadBundler.Core/Inlining/Inliner.cs) `ProtectUsedBuiltinOverrides` (phase D2) detects
+   include-origin definitions that shadow a builtin a use-imported wrapper actually invokes (a reference
+   the model bound to *no* symbol = the builtin) and renames the override + its references to a namespaced
+   name; the wrapper's builtin reference is left untouched and reaches the builtin again. Pure renaming →
+   CSG unchanged. Walks bodies via `AstNodes.DescendantsAndSelf` (reused from `Transforming/`). Tested in
+   `Slice5BundleTests` + the V-004 differential. **This is a genuine "use-isolation can't be flattened"
+   limitation; the rename is the only OpenSCAD-faithful escape.**
+
+3. **`is_undef(<bare identifier>)` no longer warns.** Ground truth: `builtin_is_undef`
+   (`builtin_functions.cc`) looks a *bare-identifier* argument up with `try_lookup_variable`, which never
+   warns — the call exists to PROBE for undefinedness. [SemanticAnalyzer.cs](src/ScadBundler.Core/Semantics/SemanticAnalyzer.cs)
+   `ResolveCall` special-cases this (a known var still binds for renaming; any non-identifier argument
+   still warns). Removes ~half the `BOSL2_NO_STD_WARNING` flood (the `is_undef(BOSL2_NO_STD_WARNING)`
+   reads). 4 tests.
+
+4. **Doubled SB3004 collapsed.** The semantic pass (within-file scope) and the inliner (merged-set
+   collision) independently reported the *same* within-file redefinition with an identical code/span/
+   message. [Bundler.cs](src/ScadBundler.Core/Inlining/Bundler.cs) now `DistinctBy`-dedups identical
+   diagnostics across pipeline stages. 1 test.
+
+**Residual BOSL2 warnings (all intentional/expected — match OpenSCAD's actual behavior):**
+- `BOSL2_NO_STD_WARNING` ×31 via `!BOSL2_NO_STD_WARNING`: OpenSCAD is silent **only** by `&&`/`||`
+  short-circuit (`is_undef(_BOSL2_STD)` is false), a runtime control-flow fact a static analyzer can't
+  model soundly. Left as a documented static-vs-runtime divergence (also matches the old brief's "keep").
+- `helical`/`tangents`/`lcmlist` (genuine BOSL2 bugs) and `best_i` (C-style-`for` accumulator self-ref):
+  all in code paths the gear model never calls, so OpenSCAD never evaluates them here — but **OpenSCAD
+  warns identically when those paths *do* execute** (verified for `best_i`'s pattern), so they are correct
+  static findings. Do NOT silence.
+- SB3004 redefinitions ×6 (`pie_slice`/`right_triangle`/`reverse` in the root over BOSL2; BOSL2-internal
+  `_get_cp`/`_sort_vectors`/`_list_shape_recurse`): genuine multi-definitions, last-wins. OpenSCAD emits
+  no redefinition warning at all (verified), but this is the bundler's deliberate value-add (SB3004), now
+  reported once instead of twice. Keep.
+
+---
+
+### Other post-v1 work
 
 1. Broader post-v1: WASM/JSON API + "ScadBundler Live", real-world golden masters (BOSL2/NopSCADlib/
    dotSCAD), emitter line-length wrapping. See §"Post-v1 work". The real-world golden masters now also

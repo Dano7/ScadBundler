@@ -50,6 +50,15 @@ public sealed class SemanticAnalyzer
     private FileEnvironment _currentEnv = FileEnvironment.Empty;
     private AstNode? _currentTopLevelDecl;
 
+    // Function literals are closures resolved lazily at call time, so a literal's body must see every
+    // sibling binding of the enclosing let/for/comprehension group — including its own name (recursion)
+    // and bindings written after it (forward/mutual recursion) — not just the ones already in the frame.
+    // While a binding group's values are being resolved, each function literal is therefore deferred
+    // (with a snapshot of the scope chain at its definition site, so any intervening inner scopes
+    // survive) and its body resolved only once the whole group's names are in the frame. Eager,
+    // non-closure reads are never deferred, so `let(w = w + 1) w` still warns on the self-reference.
+    private readonly Stack<List<(FunctionLiteral Literal, LocalFrame[] Scope)>> _deferredLiterals = new();
+
     private SemanticAnalyzer(LoadGraph graph) => _graph = graph;
 
     /// <summary>Analyzes a loaded graph (follows <c>include</c> merges and <c>use</c> imports). Never throws.</summary>
@@ -509,7 +518,18 @@ public sealed class SemanticAnalyzer
                 break;
 
             case FunctionLiteral literal:
-                ResolveFunctionLiteral(literal);
+                if (_deferredLiterals.Count > 0)
+                {
+                    // Inside a binding group: defer until every sibling name is in the frame (closure,
+                    // resolved lazily). Snapshot the scope chain so the literal's enclosing frames are
+                    // restored at resolution time even after intervening inner scopes are popped.
+                    _deferredLiterals.Peek().Add((literal, [.. _scopeChain]));
+                }
+                else
+                {
+                    ResolveFunctionLiteral(literal);
+                }
+
                 break;
 
             case ForComprehension comprehension:
@@ -562,7 +582,23 @@ public sealed class SemanticAnalyzer
         // yields a function value (e.g. an immediately-invoked function literal).
         if (call.Callee is Identifier callee)
         {
-            RecordResolution(callee, ResolveFunctionCall(callee));
+            Symbol? calleeSymbol = ResolveFunctionCall(callee);
+            RecordResolution(callee, calleeSymbol);
+
+            // OpenSCAD special-cases `is_undef(<bare identifier>)`: the builtin looks the name up with
+            // try_lookup_variable, which never warns on an unknown name — the call exists precisely to
+            // PROBE for undefinedness (builtin_functions.cc `builtin_is_undef`). Any other argument shape
+            // (`is_undef(a + 1)`, `is_undef(f())`, `is_undef(a.b)`) evaluates normally and does warn. We
+            // still resolve the identifier (so a known variable is renamed) but suppress the unknown
+            // warning — e.g. BOSL2's `is_undef(BOSL2_NO_STD_WARNING)` opt-in config probes.
+            if (calleeSymbol is null
+                && callee.Name == "is_undef"
+                && !IsLocal("is_undef", Kind.Function)
+                && call.Arguments is [{ Name: null, Value: Identifier probed }])
+            {
+                RecordResolution(probed, ResolveVariableRead(probed, reportUnknown: false));
+                return;
+            }
         }
         else
         {
@@ -599,13 +635,34 @@ public sealed class SemanticAnalyzer
 
     /// <summary>Resolves binding values left-to-right, each seeing the bindings added before it, then
     /// adds the bound name to the current (already-pushed) frame. Mirrors OpenSCAD's sequential
-    /// <c>let</c>/<c>for</c> binding visibility.</summary>
+    /// <c>let</c>/<c>for</c> binding visibility for eager reads. Function literals are closures: they are
+    /// deferred and resolved only after the whole group's names are in the frame, so self/forward/mutual
+    /// references inside a literal body resolve (the group frame is shared by reference with each
+    /// snapshot, so adding later names makes them visible to the deferred bodies).</summary>
     private void ResolveBindings(IReadOnlyList<Binding> bindings)
     {
+        var deferred = new List<(FunctionLiteral Literal, LocalFrame[] Scope)>();
+        _deferredLiterals.Push(deferred);
         foreach (Binding binding in bindings)
         {
             ResolveExpression(binding.Value, comprehensionAllowed: false);
             _scopeChain[^1].Variables.Add(binding.Name);
+        }
+
+        _deferredLiterals.Pop();
+
+        // The group's names are now all in the frame. Resolve each deferred closure body against the
+        // scope chain captured at its definition site: its enclosing frames survive by reference (a
+        // popped LocalFrame is never mutated or reused), and the shared group frame now holds every
+        // sibling name, so recursive/forward/mutual references inside the body resolve.
+        foreach ((FunctionLiteral literal, LocalFrame[] scope) in deferred)
+        {
+            LocalFrame[] current = [.. _scopeChain];
+            _scopeChain.Clear();
+            _scopeChain.AddRange(scope);
+            ResolveFunctionLiteral(literal);
+            _scopeChain.Clear();
+            _scopeChain.AddRange(current);
         }
     }
 
@@ -632,7 +689,7 @@ public sealed class SemanticAnalyzer
     // Resolution rules (§5)
     // ---------------------------------------------------------------------------------------------
 
-    private Symbol? ResolveVariableRead(Identifier identifier)
+    private Symbol? ResolveVariableRead(Identifier identifier, bool reportUnknown = true)
     {
         string name = identifier.Name;
         if (Builtins.IsSpecialVariable(name))
@@ -656,7 +713,11 @@ public sealed class SemanticAnalyzer
             return null; // PI
         }
 
-        ReportUnknown("variable", name, identifier.Span);
+        if (reportUnknown)
+        {
+            ReportUnknown("variable", name, identifier.Span);
+        }
+
         return null;
     }
 

@@ -4,6 +4,7 @@ using ScadBundler.Core.Diagnostics;
 using ScadBundler.Core.Loading;
 using ScadBundler.Core.Semantics;
 using ScadBundler.Core.Text;
+using ScadBundler.Core.Transforming;
 
 namespace ScadBundler.Core.Inlining;
 
@@ -102,6 +103,10 @@ public static class Inliner
             // Phases C/D — collisions + dedup over the merged definition/variable set.
             List<Candidate> rootDefs = RootDefinitions(rootFlat, prologueNodes);
             ResolveCollisions(useItems, rootDefs);
+
+            // Phase D2 — free OpenSCAD builtin names that a `use`d wrapper needs but an include-origin
+            // definition shadows (the BOSL2 `translate`/`cube`/… override pattern); see the method.
+            ProtectUsedBuiltinOverrides(useItems, rootDefs);
 
             // Phases E/F — assemble + single rewrite pass (renames + normalization).
             var rewriter = new BundleRewriter(_renames, _diagnostics);
@@ -360,6 +365,90 @@ public static class Inliner
             {
                 ResolveGroup([.. group]);
             }
+        }
+
+        // A `use`d library can capture an OpenSCAD builtin behind a thin wrapper so that code which
+        // OVERRIDES that builtin can still reach the original — BOSL2's `builtins.scad` does exactly this
+        // (`module _translate(v) translate(v) children();`, `use`d by `transforms.scad`, whose own
+        // `module translate(v) { …; _translate(v) …; }` overrides the builtin). OpenSCAD keeps the
+        // wrapper isolated in the used file's FileContext, where `translate` still means the builtin;
+        // flattening drops the wrapper next to the override in one scope, so the wrapper's bare
+        // `translate` now binds to the override → infinite recursion (verified against the official
+        // binary). There is no syntax to name a shadowed builtin, so we instead FREE the name: rename the
+        // include-origin override (and every reference the model bound to it) to a namespaced name. The
+        // wrapper's builtin reference resolves to no symbol, so it is left untouched and reaches the
+        // builtin again. Only builtins a wrapper actually needs are freed, to keep the bundle stable.
+        private void ProtectUsedBuiltinOverrides(List<Candidate> useItems, List<Candidate> rootDefs)
+        {
+            // Include-origin (flattened, non-namespaced) definitions whose name shadows a builtin.
+            var moduleOverrides = new Dictionary<string, List<Candidate>>(StringComparer.Ordinal);
+            var functionOverrides = new Dictionary<string, List<Candidate>>(StringComparer.Ordinal);
+            foreach (Candidate def in rootDefs)
+            {
+                if (def is { FromUse: false, Kind: DefKind.Module } && Builtins.IsModule(def.Name))
+                {
+                    AddOverride(moduleOverrides, def);
+                }
+                else if (def is { FromUse: false, Kind: DefKind.Function } && Builtins.IsFunction(def.Name))
+                {
+                    AddOverride(functionOverrides, def);
+                }
+            }
+
+            if (moduleOverrides.Count == 0 && functionOverrides.Count == 0)
+            {
+                return;
+            }
+
+            // Builtin names a use-imported body actually invokes (a reference the model bound to no
+            // symbol = the builtin itself, not one of the used file's own definitions).
+            foreach (Candidate use in useItems)
+            {
+                foreach (AstNode node in AstNodes.DescendantsAndSelf(use.Node))
+                {
+                    switch (node)
+                    {
+                        case ModuleInstantiation mi
+                            when moduleOverrides.TryGetValue(mi.Name, out List<Candidate>? mods)
+                                && _model.Resolve(mi) is null:
+                            FreeBuiltinName(mods);
+                            moduleOverrides.Remove(mi.Name); // free once
+                            break;
+                        case FunctionCallExpression { Callee: Identifier callee }
+                            when functionOverrides.TryGetValue(callee.Name, out List<Candidate>? fns)
+                                && _model.Resolve(callee) is null:
+                            FreeBuiltinName(fns);
+                            functionOverrides.Remove(callee.Name);
+                            break;
+                    }
+                }
+            }
+
+            static void AddOverride(Dictionary<string, List<Candidate>> map, Candidate def)
+            {
+                if (!map.TryGetValue(def.Name, out List<Candidate>? list))
+                {
+                    list = [];
+                    map[def.Name] = list;
+                }
+
+                list.Add(def);
+            }
+        }
+
+        // Renames every include-origin definition of an overridden builtin — and all references the model
+        // bound to them — to one namespaced name, freeing the bare builtin name for the wrapper that needs
+        // it. Pure renaming: the CSG is unchanged. Multiple definitions of the name (cross-include
+        // redefinitions, last-wins) all collapse onto the surviving definition's freed name.
+        private void FreeBuiltinName(List<Candidate> overrides)
+        {
+            string newName = RenameDeclaration(overrides[^1], report: false);
+            for (int i = 0; i < overrides.Count - 1; i++)
+            {
+                _renames[overrides[i].Node] = newName;
+            }
+
+            RedirectReferences(overrides, newName);
         }
 
         private void ResolveGroup(List<Candidate> group)

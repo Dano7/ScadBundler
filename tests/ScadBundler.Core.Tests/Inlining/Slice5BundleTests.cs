@@ -77,6 +77,39 @@ public sealed class Slice5BundleTests
     }
 
     [Fact]
+    public void UsedBuiltinWrapper_OverriddenByIncludedModule_FreesBuiltinName_NoRecursion()
+    {
+        // BOSL2's pattern: builtins.scad wraps the OpenSCAD builtin `translate`; transforms.scad `use`s
+        // it and OVERRIDES `translate`, delegating to the wrapper to reach the original. OpenSCAD keeps
+        // the wrapper isolated (its `translate` = builtin); flattened naively, the wrapper's bare
+        // `translate` would bind to the override → infinite recursion (the real failure seen rendering
+        // ParametricCompoundPlanetary). The inliner must free the builtin name by renaming the
+        // include-origin override and its references, leaving the wrapper's builtin call untouched.
+        var (bundled, _) = BundleHelper.Bundle(
+            null,
+            ("main.scad", "include <transforms.scad>\ntranslate([1, 0, 0]) cube(1);"),
+            ("transforms.scad", "use <builtins.scad>\nmodule translate(v) { _translate(v) children(); }"),
+            ("builtins.scad", "module _translate(v) translate(v) children();"));
+
+        // The override no longer occupies the bare builtin name, so the wrapper's `translate` is the builtin.
+        Assert.DoesNotContain(bundled.Statements, s => s is ModuleDefinition { Name: "translate" });
+
+        // The wrapper still calls the bare (unrenamed) builtin `translate`...
+        ModuleDefinition wrapper = SemanticHelper.Find<ModuleDefinition>(
+            bundled, m => m.Body is ModuleInstantiation { Name: "translate" });
+        Assert.NotEqual("translate", wrapper.Name);
+
+        // ...while the override delegates to the (renamed) wrapper, never to the bare name or itself.
+        ModuleDefinition over = bundled.Statements.OfType<ModuleDefinition>()
+            .First(m => m != wrapper && m.Name.EndsWith("translate", StringComparison.Ordinal));
+        Assert.Contains(SemanticHelper.Descendants(over), n => n is ModuleInstantiation mi && mi.Name == wrapper.Name);
+        Assert.DoesNotContain(SemanticHelper.Descendants(over), n => n is ModuleInstantiation { Name: "translate" });
+
+        // The user's own call resolves to the override (renamed), not the freed builtin name.
+        Assert.DoesNotContain(bundled.Statements, s => s is ModuleInstantiation { Name: "translate" });
+    }
+
+    [Fact]
     public void B003_Assign_NormalizedToLet()
     {
         var (bundled, diagnostics) = BundleHelper.Bundle(
