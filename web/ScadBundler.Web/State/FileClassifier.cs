@@ -44,14 +44,15 @@ public static class FileClassifier
         ArgumentNullException.ThrowIfNull(uploads);
         ArgumentNullException.ThrowIfNull(analysis);
 
-        // Resolved files reachable from the root. A basename alias can place a used file at a case-folded
-        // path (e.g. uploaded ForkedHolderLib.scad referenced as <forkedholderlib.scad>), so we also match
-        // case-insensitively on the full path — exact for folder/zip uploads, case-tolerant for loose ones.
-        var used = new HashSet<string>(StringComparer.Ordinal);
-        var usedLower = new HashSet<string>(StringComparer.Ordinal);
+        // Uploads reached from the root, by the upload that OWNS each resolved tree node. A loose upload is
+        // placed at an alias path the loader resolves (`<BOSL2/std.scad>` → /proj/BOSL2/std.scad, or a
+        // case-folded path), so the tree references that alias, not the upload's own path; ResolvedOwners
+        // maps the alias back to the owning upload. For folder/zip uploads it is the identity, so this
+        // stays exact (no over-marking a same-basename twin). The set holds owner canonical paths.
+        var usedOwners = new HashSet<string>(StringComparer.Ordinal);
         if (analysis.Tree is { } tree)
         {
-            CollectResolved(tree.Root, used, usedLower);
+            CollectUsedOwners(tree.Root, analysis.ResolvedOwners, usedOwners);
         }
 
         var result = new List<ClassifiedFile>();
@@ -66,7 +67,7 @@ public static class FileClassifier
 
             FileUsage usage =
                 string.Equals(canonical, analysis.Root, StringComparison.Ordinal) ? FileUsage.Root
-                : used.Contains(canonical) || usedLower.Contains(canonical.ToLowerInvariant()) ? FileUsage.Used
+                : usedOwners.Contains(canonical) ? FileUsage.Used
                 : FileUsage.Unused;
 
             result.Add(new ClassifiedFile(canonical, usage));
@@ -75,21 +76,22 @@ public static class FileClassifier
         return result;
     }
 
-    private static void CollectResolved(DependencyNode node, HashSet<string> used, HashSet<string> usedLower)
+    private static void CollectUsedOwners(
+        DependencyNode node,
+        IReadOnlyDictionary<string, string> resolvedOwners,
+        HashSet<string> usedOwners)
     {
         if (node.Origin == ReferenceOrigin.Font || !node.Resolved)
         {
             return; // fonts and unresolved references are not "used files"
         }
 
-        if (used.Add(node.VirtualPath))
-        {
-            usedLower.Add(node.VirtualPath.ToLowerInvariant());
-        }
+        // Map the resolved (possibly alias) path back to the upload that owns it; identity if not aliased.
+        usedOwners.Add(resolvedOwners.GetValueOrDefault(node.VirtualPath, node.VirtualPath));
 
         foreach (DependencyNode child in node.Children)
         {
-            CollectResolved(child, used, usedLower);
+            CollectUsedOwners(child, resolvedOwners, usedOwners);
         }
     }
 }

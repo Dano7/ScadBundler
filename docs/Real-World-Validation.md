@@ -105,6 +105,26 @@ thread (Web Worker / async yielding), show a determinate progress indicator tied
 cut redundant work (the analyzer parses every file for inference and the loader parses them again; a large
 loose upload also re-runs the whole fixpoint on every keystroke/upload).
 
+### 1.5 — Web: loose files all shown "unused" in the file list · **RESOLVED**
+
+**Symptom**: with a **loose** upload the file list marked every dependency **unused** (only the root was
+"used"); a `.zip`/folder upload classified correctly. (Reported alongside the 1.1/minify work, but
+independent of it — `git` confirms neither the `--lint` nor the special-variable change touched `web/` or
+`Workspace/`; this was a **pre-existing** gap in `FileClassifier`, last changed in the W2 feature commit.)
+
+**Root cause**: `FileClassifier` marked an upload "used" only when **its own** virtual path appeared in the
+dependency tree. But for a loose upload the basename fixpoint places a referenced file at the **alias** path
+the loader resolves — `<BOSL2/std.scad>` → `/proj/BOSL2/std.scad`, while the upload sits at `/proj/std.scad`
+— so the tree references the alias, which never matched the upload's path. (Zip/folder uploads already sit
+at their real sub-paths, so the exact match worked — hence the loose-vs-zip split.) A case-insensitive
+fallback covered sloppy-case basenames but **not** sub-path aliases.
+
+**Fix**: `ProjectAnalyzer` now exposes its alias→owner map as `ProjectAnalysis.ResolvedOwners` (every placed
+path → the owning upload; identity for non-aliased files). `FileClassifier` maps each resolved tree node
+back through it, so an upload is "used" when it **owns** a reached path. This subsumes the case-fold hack and
+fixes sub-path aliases **without** over-marking a same-basename twin in a structured upload. Verified on the
+real loose BOSL2 upload: 1 root / **33 used** / 23 genuinely-unused (matching the 33 files actually inlined).
+
 ---
 
 ## How these were verified

@@ -78,7 +78,7 @@ public static class ProjectAnalyzer
             (IReadOnlyList<MissingReference> rawMissing, IReadOnlyList<AmbiguousReference> rawAmbiguous) =
                 ClassifyUnresolved(ScanUnresolved(fs, parseCache, originals), originals);
             return (fs, new ProjectAnalysis(
-                candidates, inferredRoot, null, null, rawMissing, rawAmbiguous, []));
+                candidates, inferredRoot, null, null, rawMissing, rawAmbiguous, [], aliasOwner));
         }
 
         // 4. Dependency report from the load graph.
@@ -98,7 +98,7 @@ public static class ProjectAnalyzer
         IReadOnlyList<DiagnosticDto> diagnostics = ProjectDiagnostics(graph);
 
         return (fs, new ProjectAnalysis(
-            candidates, inferredRoot, root, tree, missing, ambiguous, diagnostics));
+            candidates, inferredRoot, root, tree, missing, ambiguous, diagnostics, aliasOwner));
     }
 
     // ---------------------------------------------------------------------------------------------
