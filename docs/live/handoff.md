@@ -6,22 +6,127 @@ should be able to resume from here with no other context.
 
 ---
 
-## ▶ Next session — start here
+## ▶ Next session — start here: **Slice W5 §C1 — responsiveness (progress + off-thread)**
 
-**W0 + W1 + W2 + W3 are done and green.** The web companion is **feature-complete for v1 and shipping**.
-**W4 (openscad-wasm 3D preview) stays deferred — do not build** unless the owner asks. There is no further
-required web slice; remaining roadmap work is the real-world golden masters (BOSL2/NopSCADlib/dotSCAD) and
-post-v1 stretches (worker-thread bundling, Monaco) — none of them blocking.
+**W0 + W1 + W2 + W3 are done and green; v1 is feature-complete and shipping.** The chosen next work is
+**Slice W5 §C1** — make the page *stay responsive* on big, real projects (BOSL2-scale). Today a large
+loose project (BOSL2: 57 files, ~2.9 MB bundle) blocks the UI thread long enough that the browser shows
+**"Page isn't responding… Wait / Exit Page"** with **no feedback**, so it *looks broken* even though it
+works. Full design: **[slices/Slice-W5-Large-Project-UX.md](slices/Slice-W5-Large-Project-UX.md) §C** (this
+session does **§C1 only** — yield-based progress + debounce/cancel; §C2 "do less work" and the §C3 Worker
+are follow-ups). **W4 stays deferred. Do not change Core semantics or add a Core dependency.**
+
+### What §C1 is (and is not)
+- **Goal:** the recompute runs **off the UI render path enough to paint**, and shows a **determinate
+  progress indicator** tied to pipeline phases, so the "unresponsive" prompt never appears and the user
+  sees what's happening. Plus **debounce + cancel** so a flurry of intents (multi-file drop, fast typing)
+  doesn't queue N full bundles.
+- **Not §C1:** reducing the actual CPU work (that's **§C2** — the analyzer parses every file for inference
+  and `WebBundler` re-loads/parses them again for the bundle; sharing one parse is the real *speed* win and
+  is **Core-side**, so defer + ask). A true second thread (**§C3** Web Worker) is the robust fix for the
+  very largest projects; §C1's yield-based approach is the high-impact-per-effort first step. Be honest in
+  the UI copy: §C1 makes it *feel* alive, §C2/§C3 make it *fast*.
+
+### The shape of the change (all in `web/ScadBundler.Web/`, no Core edits)
+The single chokepoint is **`State/WorkspaceController.Recompute()`** — today **synchronous**:
+`ProjectAnalyzer.Analyze(Uploads, _explicitRoot)` → gate on `Root != null && Missing+Ambiguous empty` →
+`WebBundler.Bundle(fs, root, Options)` → `Changed?.Invoke()`. Every intent (`AddOrReplace`/`Remove`/
+`SetRoot`/`SetOptions`/`EditMainFile`/`ResolveAmbiguous`) calls it inline.
+
+1. **Make recompute async + phased.** Convert to `async Task RecomputeAsync(CancellationToken)` that runs
+   the coarse phases the Web already orchestrates — **(a) analyze** (`ProjectAnalyzer.Analyze`, which itself
+   does load+semantic) and **(b) bundle** (`WebBundler.Bundle`, which re-loads+inlines+emits) — with an
+   `await Task.Yield()` **before each phase** (and set the phase label first, fire `Changed`, *then* yield,
+   so the browser paints the new label before the blocking call). On WASM (single-threaded) `Task.Yield`
+   doesn't parallelize — it returns control to the browser event loop so it can **paint between phases**,
+   which resets the "unresponsive" watchdog. (See caveat below — one phase can still exceed the watchdog on
+   the biggest inputs; that's what §C3 fixes.)
+2. **Expose progress state.** Add to the controller a `BusyPhase` (e.g. `enum { Idle, Analyzing, Bundling }`
+   or a `string?`) + maybe a 0..1 fraction; set it before each phase and clear it at the end; the existing
+   `Changed` event already drives `App.razor`'s re-render. Surface it in **`EngineStatus.razor`** (today a
+   static "Engine ready" banner — the natural home for a `role="status"` busy/progress line) or a small new
+   `BusyIndicator` component. Determinate = phase N of M; if you want a bar, drive width off the fraction.
+3. **Debounce + cancel.** Coalesce rapid intents: keep a `CancellationTokenSource` field; each intent
+   cancels the previous and (optionally after a short debounce, ~100–150 ms, like `MainFileEditor`'s 200 ms)
+   starts a new `RecomputeAsync`. Check the token **after each `await Task.Yield()`** and bail (cooperative
+   cancellation — there is no preemption on WASM, so a token check between phases is the granularity you
+   get). This stops a 5-file drop from running 5 full BOSL2 bundles back-to-back.
+
+### Key files
+- `State/WorkspaceController.cs` — the recompute owner (make async, phased, cancellable; add `BusyPhase`).
+  All intents currently `void … { …; Recompute(); }`; they become `async`-fire-and-forget or schedule the
+  debounced recompute. Keep `Analysis`/`Bundle`/`Root`/`Options`/`Uploads` semantics identical.
+- `App.razor` — already subscribes `Controller.Changed += OnChanged` → `InvokeAsync(StateHasChanged)`; no
+  structural change needed, it re-renders on each phase tick. Add the busy indicator into the layout if not
+  using `EngineStatus`.
+- `Components/EngineStatus.razor` — extend to show the busy phase (it already has `role="status"
+  aria-live="polite"`, which is exactly right for announcing "Analyzing… / Bundling…").
+- Tests: `tests/ScadBundler.Web.Tests/` — bUnit on the **controller** (drive an intent, assert `BusyPhase`
+  transitions and that a superseding intent cancels the prior), plus a render test that the indicator shows
+  during a (slow-stubbed) recompute. The heavy bUnit timing gotcha from W2 (`MainFileEditor`) applies:
+  generous `WaitForAssertion` windows because this suite can run beside the CPU-heavy integration suite.
+
+### Gotchas / facts the cold session needs
+- **Blazor WASM is single-threaded by default.** `await Task.Yield()`/`Task.Delay` does **not** run work in
+  parallel — it just lets the browser paint/handle events between synchronous chunks. So progress is real
+  but the page is still busy *during* a phase. For BOSL2 a single phase (the bundle/emit of ~2.9 MB) may
+  still run several seconds and *could* still trip the watchdog — set expectations in copy (§C3 note) and
+  treat the Web Worker as the real fix if it still bites after §C1.
+- **`Recompute` must keep its exact result semantics** — `Analysis`, `Bundle`, `Root` are read all over the
+  UI; only the *timing/threading* and the new `BusyPhase` change. Bundle output stays byte-identical to the
+  CLI (`BundleParityTests` must stay green).
+- **Cancellation is cooperative** — there's no Core hook to abort mid-bundle (and we won't add one; Core
+  stays sync/dependency-free). You can only cancel *between* the Web-orchestrated phases. That's enough to
+  stop queued recomputes; it won't interrupt one in-flight `WebBundler.Bundle`.
+- **Don't thread `IProgress`/`CancellationToken` into Core** for §C1 — keep the phasing in the Web layer
+  over the existing facade calls. If finer-grained progress is wanted later, that's a Core-touching change
+  (§C2 territory) → stop and ask first.
+- **`EditMainFile` already debounces at the `MainFileEditor` (200 ms) layer** — don't double-debounce it
+  into a sluggish editor; the controller-level debounce should be short (or skip debounce for `EditMainFile`
+  and only cancel-supersede).
+
+### Exit criteria for §C1
+- A BOSL2-scale loose project shows a visible **Analyzing… → Bundling…** progression and the browser
+  **"unresponsive" prompt does not appear** for the analyze phase (bundle phase improved; fully solved only
+  with §C3 — note it honestly).
+- Rapid intents coalesce (a 5-file drop runs **one** final recompute, not five).
+- **Bundle output and `SBxxxx` codes unchanged; CLI byte-parity preserved** (`BundleParityTests` green).
+- bUnit coverage on the controller's busy-phase transitions + cancellation; build 0 warnings.
+
+---
+
+## Post-W3 fixes landed on `main` (2026-06-14) — context for the cold session
+
+Three small, independent PRs after W3 shipped (all green, all merged to `main`). None changed the web UX
+flow, but two touched Core (diagnostics/transforms) and one touched the web classifier:
+
+- **PR #8 — `--lint` gating (Core diagnostics).** SB3004 (module/function redefinition) and SB3005 (unknown
+  reference) were false-positiving on real libraries (BOSL2: ~43 spurious warnings) — they're static
+  approximations of OpenSCAD's *evaluation-time* behavior. Now **suppressed by default**, surfaced only
+  under a new `--lint` flag (`BundleOptions.Lint`, filtered in `Bundler.IsStaticLint`). **The web defaults
+  to lint-off**, so the Problems panel is now clean for valid projects. SB3003 (variable reassignment) is
+  unchanged. See [../Diagnostics.md](../Diagnostics.md) + [../Real-World-Validation.md](../Real-World-Validation.md) §1.1.
+- **PR #9 — minify/obfuscate special-variable fix (Core transforms).** `DeadCodeElimination` was tree-shaking
+  top-level `$`-special-variable defaults (dynamically scoped → invisible to the static reference model), so
+  `--minify`/`--obfuscate` bundles crashed in OpenSCAD on BOSL2's `$tags_shown`/`$transform` attachment
+  globals. Fixed: special-var assignments are never tree-shaken. The web's Minify/Obfuscate options are now
+  safe on attachment-using projects. ([../Real-World-Validation.md](../Real-World-Validation.md) §1.1, Slice-7 §6.2.)
+- **PR #10 — file-list used/unused for loose sub-path uploads (web).** `FileClassifier` showed every loose
+  dependency "unused" when references used sub-paths (`<BOSL2/std.scad>`), because the basename fixpoint
+  aliases the file at the loader's path while the upload sits at its bare path. Fixed via the new
+  **`ProjectAnalysis.ResolvedOwners`** (alias→owner map); `FileClassifier` now marks an upload used when it
+  *owns* a reached tree path. (Supersedes the old case-insensitive-full-path hack.) ([../Real-World-Validation.md](../Real-World-Validation.md) §1.5.)
+
+**Current test baseline (main):** build 0 warnings; **Core 715, CLI 24, Web 46, Integration 35** green.
 
 **One manual step the owner must do once (GitHub Pages):** in the repo's **Settings → Pages → Build and
 deployment**, set **Source = "GitHub Actions"**. That's the only switch — no branch, no extra account. The
 workflow ([../../.github/workflows/deploy-pages.yml](../../.github/workflows/deploy-pages.yml)) then deploys
-on every push to `main` (and via the **Run workflow** button / `workflow_dispatch`). Live URL once enabled:
-**<https://dano7.github.io/ScadCombiner/>** (repo `Dano7/ScadCombiner`; the workflow derives the
-`/<repo>/` base-href dynamically, so a rename just works). This branch ships as a **feature branch** —
-Pages won't deploy until it lands on `main` (or you manually dispatch the workflow from this branch).
+on every push to `main` (and via the **Run workflow** button / `workflow_dispatch`). Live URL:
+**<https://dano7.github.io/ScadCombiner/>** (the workflow derives the `/<repo>/` base-href dynamically).
 
-> Before adding **any** dependency to `ScadBundler.Core`, stop and ask (Core stays dependency-free).
+> Before adding **any** dependency to `ScadBundler.Core`, stop and ask (Core stays dependency-free). The
+> §C1 work is **web-only** — keep it that way.
 
 ---
 
@@ -129,9 +234,10 @@ conflicts get a one-click picker. **Core untouched; no Core dependency added; no
 
 ### Files added (`web/ScadBundler.Web/`)
 - `State/FileClassifier.cs` — pure `Classify(uploads, analysis) → ClassifiedFile[]` partition into
-  **Root / Used / Unused** (`FileUsage`). Used = resolved tree paths; matched exact **or case-insensitively
-  on the full path** so a basename-aliased file (e.g. uploaded `MyLib.scad` referenced `<mylib.scad>`)
-  still counts as used. Unit-tested directly (no browser).
+  **Root / Used / Unused** (`FileUsage`). Used = an upload that **owns** a resolved tree path, mapped via
+  `ProjectAnalysis.ResolvedOwners` (alias→owner). **[Updated by PR #10, 2026-06-14]** — originally matched
+  exact/case-insensitively on the full path, which missed sub-path aliases (`std.scad` referenced
+  `<BOSL2/std.scad>`); the owner map subsumes the case-fold case and fixes sub-paths. Unit-tested directly.
 - `Components/FriendlyDiagnostics.cs` — the UI-only `SBnnnn → one sentence` map (Slice §3); unknown code ⇒
   no extra line (raw message only).
 - `Components/ProblemsPanel.razor` — non-missing diagnostics grouped Error→Warning→Info, each
@@ -180,10 +286,11 @@ conflicts get a one-click picker. **Core untouched; no Core dependency added; no
   reachable via the controller only from **distinct-Name, same-basename** uploads (e.g. `extra/utils.scad`
   + `helpers/utils.scad` with a bare `<utils.scad>` reference) — which is what `ConflictPickerTests` and
   the W2 `WorkspaceControllerTests` use. (The W0 facade still handles the raw two-`UploadedFile` list.)
-- **Used/unused classification limitation:** a loose upload aliased to a **different sub-path** (e.g.
-  `std.scad` referenced `<BOSL2/std.scad>`) is matched used only by exact/ci full path, so it can show as
-  "unused" even though its content is inlined. Rare (folder/zip uploads place verbatim, no alias); revisit
-  only if it bites. The bundle itself is unaffected.
+- **Used/unused classification (RESOLVED, PR #10 2026-06-14):** previously a loose upload aliased to a
+  **different sub-path** (`std.scad` referenced `<BOSL2/std.scad>`) showed "unused" even though it was
+  inlined — the BOSL2 loose upload made it bite (all deps showed unused). Fixed: `ProjectAnalyzer` exposes
+  `ProjectAnalysis.ResolvedOwners` (alias→owner) and `FileClassifier` marks an upload used when it owns a
+  reached path. The bundle was always unaffected; only the file-list label was wrong.
 - **`MissingRow` reuses the global DropZone ref** — it has no `[JSInvokable]` of its own. If you ever make
   drops on a missing row resolve a *specific* reference (rather than re-analyze-everything), you'll need a
   per-row callback; today "drop anywhere → basename inference resolves it" is intentional.
