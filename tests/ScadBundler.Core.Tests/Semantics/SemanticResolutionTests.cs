@@ -64,6 +64,119 @@ public sealed class SemanticResolutionTests
     }
 
     [Fact]
+    public void LetBoundFunctionLiteral_SelfRecursion_ResolvesAsLocal_NoUnknownWarning()
+    {
+        // A function literal is a closure resolved at call time, so its own name (recursion) is visible
+        // inside its body even though the let binding is added after the value is resolved — BOSL2's
+        // `strip_left`/`bcs`/`binsearch_fn` pattern (`gears.scad:3499`, `masks.scad:1524`, …).
+        var (ast, result) = SemanticHelper.AnalyzeFile(
+            "v = let (f = function (n) n <= 0 ? 0 : f(n - 1)) f(5);");
+        var innerCall = SemanticHelper.Find<FunctionCallExpression>(
+            ast, c => c.Callee is Identifier { Name: "f" });
+
+        Assert.Null(result.Model.Resolve(innerCall.Callee)); // in-literal self-reference is local
+        Assert.DoesNotContain(result.Diagnostics, d => d.Code == DiagnosticCode.UnknownReference);
+    }
+
+    [Fact]
+    public void LetBoundFunctionLiteral_ForwardReference_ResolvesAsLocal_NoUnknownWarning()
+    {
+        // The literal body references a sibling binding declared *after* it; the whole group is visible
+        // to a closure regardless of binding order.
+        var (ast, result) = SemanticHelper.AnalyzeFile(
+            "h = let (p = function (t) q(t) + 1, q = function (t) t * 2) p(3);");
+        var forwardCall = SemanticHelper.Find<FunctionCallExpression>(
+            ast, c => c.Callee is Identifier { Name: "q" });
+
+        Assert.Null(result.Model.Resolve(forwardCall.Callee)); // forward reference to a later sibling
+        Assert.DoesNotContain(result.Diagnostics, d => d.Code == DiagnosticCode.UnknownReference);
+    }
+
+    [Fact]
+    public void LetBoundFunctionLiterals_MutualRecursion_ResolveAsLocal_NoUnknownWarning()
+    {
+        var (ast, result) = SemanticHelper.AnalyzeFile(
+            "g = let (a = function (x) b(x), b = function (x) a(x)) g;");
+        var callB = SemanticHelper.Find<FunctionCallExpression>(ast, c => c.Callee is Identifier { Name: "b" });
+        var callA = SemanticHelper.Find<FunctionCallExpression>(ast, c => c.Callee is Identifier { Name: "a" });
+
+        Assert.Null(result.Model.Resolve(callB.Callee)); // a's body calls b
+        Assert.Null(result.Model.Resolve(callA.Callee)); // b's body calls a
+        Assert.DoesNotContain(result.Diagnostics, d => d.Code == DiagnosticCode.UnknownReference);
+    }
+
+    [Fact]
+    public void ComprehensionBoundFunctionLiteral_SelfRecursion_NoUnknownWarning()
+    {
+        // The deferral covers every binding-group form: a `for`-comprehension binding holding a
+        // self-recursive closure must resolve too (the binding group is resolved via ResolveBindings).
+        var (ast, result) = SemanticHelper.AnalyzeFile(
+            "v = [for (f = function (n) n <= 0 ? 0 : f(n - 1)) f(3)];");
+        var innerCall = SemanticHelper.Find<FunctionCallExpression>(
+            ast, c => c.Callee is Identifier { Name: "f" });
+
+        Assert.Null(result.Model.Resolve(innerCall.Callee));
+        Assert.DoesNotContain(result.Diagnostics, d => d.Code == DiagnosticCode.UnknownReference);
+    }
+
+    [Fact]
+    public void FunctionLiteralClosingOverComprehensionVariable_InsideLetBinding_NoUnknownWarning()
+    {
+        // Regression guard for the deferral mechanism: a literal nested inside an intervening
+        // comprehension scope (the `for`'s `i`) within a let binding value must still see that scope
+        // when its deferred body is resolved — the captured snapshot restores the popped for-frame.
+        var (ast, result) = SemanticHelper.AnalyzeFile(
+            "v = let (m = [for (i = [0:2]) function () i]) m;");
+        var read = SemanticHelper.Find<Identifier>(ast, n => n.Name == "i");
+
+        Assert.Null(result.Model.Resolve(read)); // closes over the comprehension variable (local)
+        Assert.DoesNotContain(result.Diagnostics, d => d.Code == DiagnosticCode.UnknownReference);
+    }
+
+    [Fact]
+    public void EagerLetInitializer_SelfReference_StillWarns()
+    {
+        // GUARD: an eager (non-closure) initializer sees only the prior bindings, never its own, so a
+        // self-reference is a genuine unknown — OpenSCAD agrees. Only function-literal bodies defer.
+        var (ast, result) = SemanticHelper.AnalyzeFile("bad = let (w = w + 1) w;");
+        Assert.Equal(
+            1,
+            result.Diagnostics.Count(d => d.Code == DiagnosticCode.UnknownReference && d.Message.Contains("'w'")));
+    }
+
+    [Fact]
+    public void IsUndefOfBareUnknownIdentifier_DoesNotWarn()
+    {
+        // OpenSCAD's `is_undef(<bare identifier>)` looks the name up with try_lookup_variable, which
+        // never warns on an unknown — the call exists to PROBE for undefinedness (builtin_is_undef).
+        // BOSL2's `is_undef(BOSL2_NO_STD_WARNING)` opt-in config check relies on this.
+        var (_, result) = SemanticHelper.AnalyzeFile("v = is_undef(NOT_DEFINED) ? 1 : 2;");
+        Assert.DoesNotContain(result.Diagnostics, d => d.Code == DiagnosticCode.UnknownReference);
+    }
+
+    [Fact]
+    public void IsUndefOfKnownIdentifier_StillResolvesToSymbol()
+    {
+        // The probe still binds a *known* variable to its symbol, so the inliner can rename it.
+        var (ast, result) = SemanticHelper.AnalyzeFile("KNOB = 3;\nv = is_undef(KNOB) ? 1 : 2;");
+        var read = SemanticHelper.Find<Identifier>(ast, n => n.Name == "KNOB");
+
+        Assert.NotNull(result.Model.Resolve(read));
+        Assert.DoesNotContain(result.Diagnostics, d => d.Code == DiagnosticCode.UnknownReference);
+    }
+
+    [Fact]
+    public void IsUndefOfNonIdentifierExpression_StillWarnsOnUnknown()
+    {
+        // Only a *bare identifier* argument is special-cased; any other expression evaluates normally
+        // and an unknown read inside it still warns (OpenSCAD's `else` branch evaluates the argument).
+        var (_, result) = SemanticHelper.AnalyzeFile("v = is_undef(NOT_DEFINED + 1) ? 1 : 2;");
+        Assert.Contains(
+            result.Diagnostics,
+            d => d.Code == DiagnosticCode.UnknownReference && d.Message.Contains("'NOT_DEFINED'"));
+    }
+
+    [Fact]
     public void ForBinding_ShadowsTopLevel_ResolvesToNull()
     {
         var (ast, result) = SemanticHelper.AnalyzeFile("i = 9;\nfor (i = [0:2]) cube(i);");

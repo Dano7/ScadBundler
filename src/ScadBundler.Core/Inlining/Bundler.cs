@@ -49,6 +49,9 @@ public static class Bundler
         var transformDiagnostics = new DiagnosticBag();
         Ast.ScadFile output = Transformer.Run(bundled, options.Hardening, transformDiagnostics);
 
+        // The semantic pass (within-file scope) and the inliner (merged-set collisions) independently
+        // detect the same within-file redefinition (SB3004) and report it with an identical code, span,
+        // and message; collapse such exact duplicates so a finding surfaces once, not once per stage.
         IReadOnlyList<Diagnostic> all =
         [
             .. graph.Diagnostics
@@ -57,7 +60,8 @@ public static class Bundler
                 .Concat(transformDiagnostics.ToList())
                 .OrderBy(d => d.Span.File.Path, StringComparer.Ordinal)
                 .ThenBy(d => d.Span.Start.Offset)
-                .ThenBy(d => d.Code, StringComparer.Ordinal),
+                .ThenBy(d => d.Code, StringComparer.Ordinal)
+                .DistinctBy(d => (d.Code, d.Severity, d.Message, d.Span.File.Path, d.Span.Start.Offset, d.Span.End.Offset)),
         ];
 
         return new BundleResult(output, all);

@@ -69,12 +69,14 @@ A list-comprehension generator (`for` / `if` / `let` / `each` in their comprehen
 ### SB3004 — Definition redefined (last-wins) *(Warning, Semantic)*
 - **Trigger**: a module or function name is defined more than once in the same (merged) scope.
 - **Message**: `{module|function} '{name}' is redefined; the last definition wins.`
-- **Notes**: OpenSCAD is silent here (`LocalScope.cc` overwrites the lookup entry); we warn. Under `--on-collision prefix` the definitions are instead kept and namespaced — see Spec collision strategy.
+- **Notes**: OpenSCAD is silent here (`LocalScope.cc` overwrites the lookup entry); we warn. Under `--on-collision prefix` the definitions are instead kept and namespaced — see Spec collision strategy. The semantic pass (within-file) and the inliner (merged-set collision) both detect a within-file redefinition; `Bundler` dedups the identical diagnostics so it surfaces **once**, not once per stage.
 
 ### SB3005 — Unknown reference *(Warning, Semantic)*
 - **Trigger**: a module/function/variable reference that resolves to nothing — not a built-in, special variable, local binding, or any reachable user declaration. Emitted **conservatively** (only when all files are loaded).
 - **Message**: `Unknown {module|function|variable} '{name}'.`
 - **Notes**: mirrors OpenSCAD's "Ignoring unknown …" warnings; conservative to avoid false positives from library names the analyzer can't see. See [slices/Slice-4-Semantic.md](slices/Slice-4-Semantic.md) §8.
+- **Closures**: a name referenced *inside an anonymous `function` literal body* that is a sibling binding of the enclosing `let`/`for`/comprehension group — including its own name (recursion), forward, and mutual references — does **not** warn: a function literal is a closure resolved at call time, by which point the whole binding group exists. Eager (non-closure) initializers still warn (`let(w = w + 1)`).
+- **`is_undef` probe**: `is_undef(<bare identifier>)` never warns on the identifier — OpenSCAD's `builtin_is_undef` looks a bare-identifier argument up with `try_lookup_variable` (no warning); the call exists to probe for undefinedness. A known variable still binds (so it is renamed); any *non-identifier* argument (`is_undef(a + 1)`) evaluates normally and an unknown inside it still warns. **Not modelled**: `&&`/`||` short-circuiting — a read in a branch OpenSCAD never evaluates at runtime (e.g. BOSL2's `is_undef(_BOSL2_STD) && … !BOSL2_NO_STD_WARNING`) is still flagged statically.
 
 ### SB4001 — Include/use file not found *(Warning, Loader)*
 - **Trigger**: a `<path>` cannot be resolved on the search path (Spec "File Resolution").

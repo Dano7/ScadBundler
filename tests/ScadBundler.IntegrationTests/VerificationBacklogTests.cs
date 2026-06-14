@@ -28,4 +28,12 @@ public sealed class VerificationBacklogTests
     [OpenScadFact]
     public void V3_AssignToLet_RendersIdentically() =>
         DifferentialAssert.BundleRendersIdentically(Fixture("V-003-assign-let"));
+
+    /// <summary>V4 — the BOSL2 hazards found rendering ParametricCompoundPlanetary: a <c>use</c>d builtin
+    /// wrapper overridden by an <c>include</c>d module (the inliner must free the builtin name, else the
+    /// two recurse forever) plus a self-recursive anonymous function literal (the analyzer must resolve
+    /// its own name as a closure). Both must render byte-identically to the original.</summary>
+    [OpenScadFact]
+    public void V4_BuiltinOverrideAndRecursiveLiteral_RendersIdentically() =>
+        DifferentialAssert.BundleRendersIdentically(Fixture("V-004-builtin-override"));
 }
