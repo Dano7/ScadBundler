@@ -47,6 +47,28 @@ public sealed class FileClassifierTests
     }
 
     [Fact]
+    public void Used_ForLooseFileReferencedViaSubPath_NotOrphaned()
+    {
+        // The BOSL2 case: a loose upload `std.scad` referenced as `<BOSL2/std.scad>`. The basename fixpoint
+        // aliases it at the loader's path (/proj/BOSL2/std.scad), so the dependency tree references the
+        // alias, not the upload's own /proj/std.scad. It must still classify as USED — regression: every
+        // loose, sub-path-referenced file showed "unused" because the tree path never matched the upload.
+        UploadedFile[] uploads =
+        [
+            new("model.scad", "include <BOSL2/std.scad>\nthing();\n"),
+            new("std.scad", "module thing() cube(1);\n"),
+            new("orphan.scad", "module nope() sphere(1);\n"),
+        ];
+        (_, ProjectAnalysis analysis) = ProjectAnalyzer.Analyze(uploads);
+
+        IReadOnlyList<ClassifiedFile> classified = FileClassifier.Classify(uploads, analysis);
+
+        Assert.Equal(FileUsage.Root, Usage(classified, "/proj/model.scad"));
+        Assert.Equal(FileUsage.Used, Usage(classified, "/proj/std.scad"));      // aliased to /proj/BOSL2/std.scad
+        Assert.Equal(FileUsage.Unused, Usage(classified, "/proj/orphan.scad")); // genuinely unreferenced
+    }
+
+    [Fact]
     public void AllUnused_WhenNoRoot()
     {
         // Two geometry-bearing files referencing nothing ⇒ ambiguous root (Tree null) ⇒ nothing is "used".
