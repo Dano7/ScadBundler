@@ -107,6 +107,27 @@ public sealed class TransformTests
         Assert.Contains(bundle.Statements, s => s is AssignmentStatement a && a.Value is EchoExpression);
     }
 
+    [Theory]
+    [InlineData(HardeningProfile.Minify)]
+    [InlineData(HardeningProfile.Obfuscate)]
+    public void TreeShaking_KeepsSpecialVariableDefault_ReadOnlyThroughDynamicScope(HardeningProfile profile)
+    {
+        // A top-level `$special = …` default is read through DYNAMIC scope: a descendant module reads it
+        // off the call stack, an edge the static reference model can't see (special-variable reads bind to
+        // no symbol). Tree-shaking must keep it, or the dynamic read finds `undef` at render time.
+        // Regression for BOSL2's `$tags_shown = "ALL"` / `$transform = IDENT` attachment globals vanishing
+        // under --minify/--obfuscate and crashing the bundle (assertion on the now-undefined variable).
+        ScadFile bundle = Harden(profile,
+            ("main.scad", "include <lib.scad>\nshape();\n"),
+            ("lib.scad",
+                "$decorate = \"ALL\";\n"
+                + "module shape() { deco(); }\n"
+                + "module deco() { assert($decorate == \"ALL\"); cube(1); }\n")).Bundle;
+
+        // The default survives (it would be dropped if liveness were judged only by static references).
+        Assert.Contains(bundle.Statements, s => s is AssignmentStatement { Name: "$decorate" });
+    }
+
     // ---------------------------------------------------------------------------------------------
     // Renaming integrity
     // ---------------------------------------------------------------------------------------------
