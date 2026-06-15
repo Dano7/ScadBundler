@@ -110,9 +110,26 @@
     // bundle, "Bundle now" when only the file set is awaiting its first/next bundle.
     private string ApplyLabel => Controller.OptionsDirty ? "Apply options & bundle" : "Bundle now";
 
-    private string ApplyNote => Controller.NeedsBundle
-        ? "Large project — set your options, then bundle once."
-        : Controller.IsBusy ? "Working…" : "Bundle is up to date.";
+    // The status beside the Bundle button. Order matters: a complete, current bundle reports "up to date"
+    // only after we've ruled out "still working", "ready to bundle", and "not bundleable yet" — so we never
+    // claim a bundle is current when none has been produced (e.g. pre-analysis, or blocked on missing refs).
+    private string ApplyNote
+    {
+        get
+        {
+            if (Controller.IsBusy)
+            {
+                return "Working…";
+            }
+
+            if (Controller.NeedsBundle)
+            {
+                return "Large project — set your options, then bundle once.";
+            }
+
+            return Controller.CanBundle ? "Bundle is up to date." : "Resolve the files needed above, then bundle.";
+        }
+    }
 
     private void Apply() => Controller.ApplyOptions();
 

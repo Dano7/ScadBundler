@@ -24,8 +24,10 @@ recomputes (an edit to the root re-parses only the root, not the 40 unchanged li
 take an injectable parse cache, a broader **Core-touching** change → **stop and ask before starting it**. And
 **the Web Worker** (a second WASM runtime so the UI thread never blocks *during* a phase) is the robust fix for
 the very largest projects — note the Slice-W5 doc files this under **§C1's "worker offload"**, *not* §C3 (§C3
-is the expectations note, now done); the earlier handoff mislabeled it. **W4 stays deferred. Do not change Core
-semantics or add a Core dependency without asking.**
+is the expectations note, now done). **Naming caveat:** the older §C1 section below (2026-06-14) still calls the
+worker "§C3 (Web Worker)" / "§C3 is the full fix"; read those as the §C1 offload — they predate this
+clarification and were left intact as historical record. **W4 stays deferred. Do not change Core semantics or
+add a Core dependency without asking.**
 
 ---
 

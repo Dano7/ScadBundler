@@ -207,4 +207,21 @@ public sealed class OptionsPanelTests : TestContext
         Assert.NotNull(controller.Bundle);
         Assert.True(controller.Bundle!.Ok);
     }
+
+    [Fact]
+    public async Task LargeIncompleteProject_DoesNotClaimBundleUpToDate()
+    {
+        var controller = new WorkspaceController { DebounceMs = 0 };
+        // Over the byte threshold (large) but missing a referenced library, so it can't be bundled yet.
+        string big = "// " + new string('x', WorkspaceController.LargeProjectByteThreshold)
+            + "\ninclude <missing.scad>\ncube(1);\n";
+        controller.AddOrReplace([new UploadedFile("main.scad", big)]);
+        await controller.Recomputing;
+        Services.AddSingleton(controller);
+        IRenderedComponent<OptionsPanel> cut = RenderComponent<OptionsPanel>();
+
+        Assert.False(controller.CanBundle);
+        Assert.True(cut.Find(".opt-apply-btn").HasAttribute("disabled"));     // nothing to bundle yet
+        Assert.DoesNotContain("up to date", cut.Find(".opt-apply-note").TextContent);
+    }
 }

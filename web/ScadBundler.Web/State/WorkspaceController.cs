@@ -63,7 +63,10 @@ public sealed class WorkspaceController : IDisposable
     /// <summary>The latest analysis, or <c>null</c> before the first upload.</summary>
     public ProjectAnalysis? Analysis { get; private set; }
 
-    /// <summary>The latest bundle, or <c>null</c> when the dependency set is incomplete.</summary>
+    /// <summary>The latest bundle, or <c>null</c> when there is none to show — which is <b>not</b> necessarily
+    /// an error: the dependency set may be incomplete (missing/ambiguous refs), <i>or</i> (in a large project)
+    /// the bundle is intentionally deferred until <see cref="ApplyOptions"/>. UI code should branch on
+    /// <see cref="CanBundle"/> / <see cref="NeedsBundle"/> rather than read <c>null</c> as "incomplete".</summary>
     public WebBundleResult? Bundle { get; private set; }
 
     /// <summary>The <b>applied</b> bundle options — the ones the current <see cref="Bundle"/> was produced
