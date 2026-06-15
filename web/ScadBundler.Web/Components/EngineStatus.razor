@@ -1,8 +1,47 @@
-<!--
-  The "loading…" affordance lives in index.html and is shown until the WASM runtime boots and replaces
-  the #app placeholder with the live UI. Once this component renders, the runtime is by definition ready,
-  so it simply reports "ready" and the drop zone is active.
--->
-<div class="engine-status ready" role="status" aria-live="polite">
-    <span class="dot"></span> Engine ready — your files stay on this device.
+@implements IDisposable
+@inject WorkspaceController Controller
+
+@*
+  The "loading…" affordance lives in index.html and is shown until the WASM runtime boots and replaces the
+  #app placeholder with the live UI. Once this component renders the runtime is by definition ready, so it
+  reports "ready" when idle and a determinate "Analyzing… → Bundling…" progress line while a recompute runs
+  (Slice W5 §C1). Single-threaded WASM can't paint *during* a phase, but yielding between phases keeps the
+  page alive; on the very largest projects a single phase can still be slow (the Web Worker, §C3, is the
+  full fix). role="status" + aria-live="polite" announces the phase to assistive tech.
+*@
+<div class="engine-status @(Controller.IsBusy ? "busy" : "ready")" role="status" aria-live="polite">
+    <span class="dot"></span>
+    <span class="engine-status-text">@StatusText</span>
+    @if (Controller.IsBusy)
+    {
+        <progress class="engine-progress" max="2" value="@PhaseStep"
+                  aria-label="@StatusText"></progress>
+        <span class="engine-step">step @PhaseStep of 2</span>
+    }
 </div>
+
+@code {
+    // The current phase as a 1-based step (Analyzing = 1, Bundling = 2) for the determinate progress bar.
+    private int PhaseStep => Controller.BusyPhase switch
+    {
+        BusyPhase.Analyzing => 1,
+        BusyPhase.Bundling => 2,
+        _ => 0,
+    };
+
+    private string StatusText => Controller.BusyPhase switch
+    {
+        BusyPhase.Analyzing => $"Analyzing {Controller.Uploads.Count} file{(Controller.Uploads.Count == 1 ? "" : "s")}…",
+        BusyPhase.Bundling => "Bundling…",
+        _ => "Engine ready — your files stay on this device.",
+    };
+
+    // Subscribe directly (rather than rely on App's render cascade) so the indicator re-renders on every
+    // phase tick even when hosted under a parent that suppresses the cascade, and so it is testable in
+    // isolation. Mirrors App's own subscription.
+    protected override void OnInitialized() => Controller.Changed += OnChanged;
+
+    private void OnChanged() => InvokeAsync(StateHasChanged);
+
+    public void Dispose() => Controller.Changed -= OnChanged;
+}

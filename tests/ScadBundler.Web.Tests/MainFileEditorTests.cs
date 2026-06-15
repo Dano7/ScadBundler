@@ -16,8 +16,9 @@ public sealed class MainFileEditorTests : TestContext
     [Fact]
     public async Task EditingTextarea_ReanalyzesAfterDebounce()
     {
-        var controller = new WorkspaceController();
+        var controller = new WorkspaceController { DebounceMs = 0 };
         controller.AddOrReplace([new UploadedFile("main.scad", "cube(1);\n")]);
+        await controller.Recomputing;
         Services.AddSingleton(controller);
         var analysisUpdated = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         controller.Changed += () =>

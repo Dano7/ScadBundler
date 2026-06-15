@@ -86,7 +86,8 @@ code {
     box-shadow: 0 0 0 3px rgba(74, 222, 128, .2);
 }
 
-.engine-status.loading .dot {
+.engine-status.loading .dot,
+.engine-status.busy .dot {
     background: var(--warn);
     animation: pulse 1s ease-in-out infinite;
 }
@@ -94,6 +95,39 @@ code {
 @keyframes pulse {
     0%, 100% { opacity: .35; }
     50% { opacity: 1; }
+}
+
+/* Determinate progress while a large project analyzes/bundles in-browser (Slice W5 §C1). */
+.engine-progress {
+    width: 8rem;
+    height: .45rem;
+    -webkit-appearance: none;
+    appearance: none;
+    border: none;
+    border-radius: 999px;
+    background: var(--panel-2);
+    overflow: hidden;
+}
+
+.engine-progress::-webkit-progress-bar {
+    background: var(--panel-2);
+    border-radius: 999px;
+}
+
+.engine-progress::-webkit-progress-value {
+    background: var(--accent);
+    border-radius: 999px;
+    transition: width .15s ease;
+}
+
+.engine-progress::-moz-progress-bar {
+    background: var(--accent);
+    border-radius: 999px;
+}
+
+.engine-step {
+    font-size: .8rem;
+    color: var(--muted);
 }
 
 /* ---- Drop zone ---- */
