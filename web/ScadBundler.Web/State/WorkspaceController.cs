@@ -13,11 +13,26 @@ namespace ScadBundler.Web.State;
 /// the prior in-flight recompute (cooperative —
 /// there is no preemption on single-threaded WASM, so the token is checked <i>between</i> phases) and, except
 /// for the already-debounced <see cref="EditMainFile"/>, waits out a short <see cref="DebounceMs"/> window.
+/// <para>
+/// For <b>large projects</b> (<see cref="IsLargeProject"/>) the bundle is the slow phase, so it is <b>not</b>
+/// run on every intent: structural changes still re-analyze live (the cheap phase that drives the file
+/// list/tree), but the bundle is deferred until the user clicks Bundle (<see cref="ApplyOptions"/>), and an
+/// option change only <i>stages</i> into <see cref="PendingOptions"/> rather than re-bundling. This lets the
+/// user set every option before paying for one bundle, instead of freezing the page once per toggle. Small
+/// projects keep the live, bundle-on-every-change behaviour (<see cref="AutoBundle"/>). An options-only
+/// re-bundle reuses the last analysis (no re-load), per Slice W5 §C2.
+/// </para>
 /// </summary>
 public sealed class WorkspaceController : IDisposable
 {
     // The virtual project root every upload is placed under (mirrors ProjectAnalyzer's convention).
     private const string ProjectRoot = "/proj/";
+
+    // Above either threshold, auto-bundling on every intent would freeze single-threaded WASM, so the project
+    // switches to manual-bundle mode (analyze live, bundle on demand). Tuned to separate BOSL2-scale projects
+    // (tens of files / megabytes) from ordinary maker projects (a handful of small files).
+    internal const int LargeProjectFileThreshold = 12;
+    internal const int LargeProjectByteThreshold = 256 * 1024;
 
     // A stateless canonicalizer: GetFullPath is a pure function of its argument, so one shared instance
     // maps an upload Name to the same canonical virtual path the analyzer uses (e.g. Root, candidates).
@@ -30,6 +45,14 @@ public sealed class WorkspaceController : IDisposable
     // Cancels the in-flight recompute when a newer intent supersedes it (coalescing rapid intents).
     private CancellationTokenSource? _recomputeCts;
 
+    // The file system from the most recent *completed* analyze, reused by an options-only re-bundle so it can
+    // skip the analyze load (Slice W5 §C2). Valid to reuse only while !_structureDirty.
+    private InMemoryFileSystem? _analyzedFs;
+
+    // True when uploads/root changed since the last analyze, so the next recompute must re-analyze before it
+    // can bundle. Starts true so the first recompute always analyzes.
+    private bool _structureDirty = true;
+
     /// <summary>The current uploaded set, in first-seen order.</summary>
     public IReadOnlyList<UploadedFile> Uploads => [.. _uploads.Values];
 
@@ -40,14 +63,66 @@ public sealed class WorkspaceController : IDisposable
     /// <summary>The latest analysis, or <c>null</c> before the first upload.</summary>
     public ProjectAnalysis? Analysis { get; private set; }
 
-    /// <summary>The latest bundle, or <c>null</c> when the dependency set is incomplete.</summary>
+    /// <summary>The latest bundle, or <c>null</c> when there is none to show — which is <b>not</b> necessarily
+    /// an error: the dependency set may be incomplete (missing/ambiguous refs), <i>or</i> (in a large project)
+    /// the bundle is intentionally deferred until <see cref="ApplyOptions"/>. UI code should branch on
+    /// <see cref="CanBundle"/> / <see cref="NeedsBundle"/> rather than read <c>null</c> as "incomplete".</summary>
     public WebBundleResult? Bundle { get; private set; }
 
-    /// <summary>The active bundle options.</summary>
+    /// <summary>The <b>applied</b> bundle options — the ones the current <see cref="Bundle"/> was produced
+    /// with. Equal to <see cref="PendingOptions"/> except, in a large project, between an option edit and the
+    /// next <see cref="ApplyOptions"/>.</summary>
     public WebBundleOptions Options { get; private set; } = new();
+
+    /// <summary>The options currently shown in (and edited by) the options panel. In a small project these
+    /// apply immediately; in a large one they are staged here until <see cref="ApplyOptions"/> bundles with
+    /// them. <see cref="OptionsDirty"/> reports whether they differ from the applied <see cref="Options"/>.</summary>
+    public WebBundleOptions PendingOptions { get; private set; } = new();
+
+    /// <summary>Whether the panel's <see cref="PendingOptions"/> differ from the applied <see cref="Options"/>
+    /// — i.e. the shown <see cref="Bundle"/> is stale with respect to the user's current option choices.</summary>
+    public bool OptionsDirty => PendingOptions != Options;
+
+    /// <summary>
+    /// Whether the project is large enough that bundling on every intent would freeze the single-threaded
+    /// WASM UI. Such projects analyze live but defer the bundle to an explicit <see cref="ApplyOptions"/>
+    /// (Slice W5 §C — set options first, then pay for one bundle).
+    /// </summary>
+    public bool IsLargeProject =>
+        _uploads.Count > LargeProjectFileThreshold || TotalUploadChars > LargeProjectByteThreshold;
+
+    /// <summary>Whether intents bundle live (small project) or defer to <see cref="ApplyOptions"/> (large).</summary>
+    public bool AutoBundle => !IsLargeProject;
+
+    /// <summary>Whether the current set could be bundled right now (a usable root, nothing missing/ambiguous).</summary>
+    public bool CanBundle =>
+        Root is not null && Analysis is { } a && a.Missing.Count == 0 && a.Ambiguous.Count == 0;
+
+    /// <summary>
+    /// Whether a (re-)bundle is warranted and possible: the set is complete but the shown bundle is missing or
+    /// out of date (stale options), and no recompute is already running. Drives the manual "Bundle" button in
+    /// a large project; always <c>false</c> in a small one (it auto-bundles, so nothing is ever stale).
+    /// </summary>
+    public bool NeedsBundle => !IsBusy && CanBundle && (Bundle is null || OptionsDirty);
 
     /// <summary>The root actually used (explicit override or inferred); <c>null</c> when none is usable.</summary>
     public string? Root { get; private set; }
+
+    // The total length of all upload texts, used (with the file count) to decide IsLargeProject. char-length
+    // is a close-enough proxy for byte size at the threshold; `||` short-circuits past this on file count.
+    private long TotalUploadChars
+    {
+        get
+        {
+            long total = 0;
+            foreach (UploadedFile file in _uploads.Values)
+            {
+                total += file.Text.Length;
+            }
+
+            return total;
+        }
+    }
 
     /// <summary>
     /// The phase of the in-flight recompute (Slice W5 §C1). <see cref="State.BusyPhase.Idle"/> when settled;
@@ -85,7 +160,8 @@ public sealed class WorkspaceController : IDisposable
     /// <summary>Raised after every recompute so subscribed components can re-render.</summary>
     public event Action? Changed;
 
-    /// <summary>Adds (or replaces, by <see cref="UploadedFile.Name"/>) files, then re-analyzes.</summary>
+    /// <summary>Adds (or replaces, by <see cref="UploadedFile.Name"/>) files, then re-analyzes (and, in a
+    /// small project, re-bundles).</summary>
     /// <param name="files">The files to merge into the workspace.</param>
     public void AddOrReplace(IEnumerable<UploadedFile> files)
     {
@@ -95,7 +171,8 @@ public sealed class WorkspaceController : IDisposable
             _uploads[file.Name] = file;
         }
 
-        Schedule(debounce: true);
+        _structureDirty = true;
+        Schedule(debounce: true, bundle: AutoBundle);
     }
 
     /// <summary>Removes the upload with the given <see cref="UploadedFile.Name"/>, then re-analyzes.</summary>
@@ -105,7 +182,8 @@ public sealed class WorkspaceController : IDisposable
         ArgumentNullException.ThrowIfNull(name);
         if (_uploads.Remove(name))
         {
-            Schedule(debounce: true);
+            _structureDirty = true;
+            Schedule(debounce: true, bundle: AutoBundle);
         }
     }
 
@@ -115,16 +193,40 @@ public sealed class WorkspaceController : IDisposable
     {
         ArgumentNullException.ThrowIfNull(virtualPath);
         _explicitRoot = virtualPath;
-        Schedule(debounce: true);
+        _structureDirty = true;
+        Schedule(debounce: true, bundle: AutoBundle);
     }
 
-    /// <summary>Replaces the bundle options, then re-bundles.</summary>
+    /// <summary>
+    /// Edits the bundle options. In a small project this applies immediately and re-bundles; in a large one it
+    /// only <i>stages</i> into <see cref="PendingOptions"/> (no bundle) so the user can set every option before
+    /// paying for one bundle via <see cref="ApplyOptions"/>.
+    /// </summary>
     /// <param name="options">The new options.</param>
     public void SetOptions(WebBundleOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
-        Options = options;
-        Schedule(debounce: true);
+        PendingOptions = options;
+        if (AutoBundle)
+        {
+            Options = options;
+            Schedule(debounce: true, bundle: true);
+        }
+        else
+        {
+            Changed?.Invoke(); // stage only: re-render the panel + its "unapplied changes" affordance
+        }
+    }
+
+    /// <summary>
+    /// Applies <see cref="PendingOptions"/> and bundles once (the large-project "Bundle" / "Apply &amp; bundle"
+    /// button). Reuses the last analysis when nothing structural changed, so an options-only apply skips the
+    /// analyze load (Slice W5 §C2). Harmless in a small project (options already applied; just re-bundles).
+    /// </summary>
+    public void ApplyOptions()
+    {
+        Options = PendingOptions;
+        Schedule(debounce: false, bundle: true);
     }
 
     /// <summary>
@@ -142,7 +244,11 @@ public sealed class WorkspaceController : IDisposable
         }
 
         _uploads[name] = new UploadedFile(name, newText);
-        Schedule(debounce: false); // the MainFileEditor already debounces keystrokes; don't double-debounce
+        _structureDirty = true;
+
+        // The MainFileEditor already debounces keystrokes; don't double-debounce. In a large project this still
+        // only re-analyzes (bundle deferred) so live typing never triggers the slow bundle phase.
+        Schedule(debounce: false, bundle: AutoBundle);
     }
 
     /// <summary>
@@ -177,12 +283,13 @@ public sealed class WorkspaceController : IDisposable
 
     // Supersede any in-flight recompute and start a fresh one. Each intent calls this; the prior token is
     // cancelled so a flurry of intents collapses to one final recompute (its result is the one that lands).
-    private void Schedule(bool debounce)
+    // `bundle` is false for a large project's structural change (analyze only — the bundle is deferred).
+    private void Schedule(bool debounce, bool bundle)
     {
         _recomputeCts?.Cancel();
         _recomputeCts?.Dispose();
         _recomputeCts = new CancellationTokenSource();
-        Recomputing = RecomputeAsync(debounce, _recomputeCts.Token);
+        Recomputing = RecomputeAsync(debounce, bundle, _recomputeCts.Token);
     }
 
     // The phased recompute (Slice W5 §C1): analyze → gate on a usable root with no missing/ambiguous
@@ -191,7 +298,11 @@ public sealed class WorkspaceController : IDisposable
     // "unresponsive" watchdog) before the synchronous work runs. Cancellation is cooperative: there is no
     // preemption on single-threaded WASM, so the token is only observed between phases — enough to drop a
     // superseded recompute, not to interrupt one already inside a Core call.
-    private async Task RecomputeAsync(bool debounce, CancellationToken token)
+    //
+    // Two phases are now independently skippable: the analyze is skipped when nothing structural changed since
+    // the last one (an options-only re-bundle reuses the cached fs/analysis — Slice W5 §C2), and the bundle is
+    // skipped when `bundle` is false (a large project's deferred bundle) or the set is incomplete.
+    private async Task RecomputeAsync(bool debounce, bool bundle, CancellationToken token)
     {
         try
         {
@@ -200,23 +311,31 @@ public sealed class WorkspaceController : IDisposable
                 await Task.Delay(DebounceMs, token);
             }
 
-            // Phase 1 — analyze (layout inference + load + semantic).
-            BusyPhase = BusyPhase.Analyzing;
-            Changed?.Invoke();
-            await YieldToBrowserAsync(token);
-
-            (InMemoryFileSystem fs, ProjectAnalysis analysis) = ProjectAnalyzer.Analyze(Uploads, _explicitRoot);
-            Analysis = analysis;
-            Root = analysis.Root;
-
-            if (analysis.Root is not null && analysis.Missing.Count == 0 && analysis.Ambiguous.Count == 0)
+            // Phase 1 — analyze (layout inference + load + semantic), unless an unchanged structure lets us
+            // reuse the last analysis. The first recompute always analyzes (_structureDirty starts true).
+            if (_structureDirty || _analyzedFs is null)
             {
-                // Phase 2 — bundle (load + inline + transform + emit).
+                BusyPhase = BusyPhase.Analyzing;
+                Changed?.Invoke();
+                await YieldToBrowserAsync(token);
+
+                (InMemoryFileSystem fs, ProjectAnalysis analysis) = ProjectAnalyzer.Analyze(Uploads, _explicitRoot);
+                _analyzedFs = fs;
+                Analysis = analysis;
+                Root = analysis.Root;
+                _structureDirty = false;
+            }
+
+            // Phase 2 — bundle (load + inline + transform + emit), reusing the analyzer's file count so it
+            // doesn't re-load just to count (Slice W5 §C2). A deferred or blocked recompute leaves the bundle
+            // null so the UI prompts (a manual "Bundle" button, or the missing/ambiguous rows).
+            if (bundle && CanBundle)
+            {
                 BusyPhase = BusyPhase.Bundling;
                 Changed?.Invoke();
                 await YieldToBrowserAsync(token);
 
-                Bundle = WebBundler.Bundle(fs, analysis.Root, Options);
+                Bundle = WebBundler.Bundle(_analyzedFs!, Root!, Options, Analysis!.FilesInlined);
             }
             else
             {

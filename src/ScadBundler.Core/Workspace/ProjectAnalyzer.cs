@@ -97,8 +97,12 @@ public static class ProjectAnalyzer
 
         IReadOnlyList<DiagnosticDto> diagnostics = ProjectDiagnostics(graph);
 
+        // Count distinct non-root loaded files (== --verbose's "files inlined") off the graph we already
+        // have, so the bundle phase can reuse it instead of re-loading just to count (Slice W5 §C2).
+        int filesInlined = FilesInlined(graph);
+
         return (fs, new ProjectAnalysis(
-            candidates, inferredRoot, root, tree, missing, ambiguous, diagnostics, aliasOwner));
+            candidates, inferredRoot, root, tree, missing, ambiguous, diagnostics, aliasOwner, filesInlined));
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -457,6 +461,20 @@ public static class ProjectAnalyzer
         }
 
         return (missing, ambiguous);
+    }
+
+    // The number of distinct non-root files in the load graph (exactly what --verbose / BundleStats report).
+    // Loading is independent of the collision/licence/hardening options — only LibraryPaths could change the
+    // resolved file set, and the web sandbox has none — so this equals what WebBundler would recount, letting
+    // the bundle phase skip a redundant SourceLoader.Load (Slice W5 §C2).
+    private static int FilesInlined(LoadGraph graph)
+    {
+        string rootPath = graph.Root.Source.Path;
+        return graph.ByAbsolutePath.Values
+            .Select(f => f.Source.Path)
+            .Where(p => !string.Equals(p, rootPath, StringComparison.Ordinal))
+            .Distinct(StringComparer.Ordinal)
+            .Count();
     }
 
     // ---------------------------------------------------------------------------------------------

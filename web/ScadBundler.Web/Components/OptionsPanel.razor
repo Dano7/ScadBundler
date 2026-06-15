@@ -1,10 +1,20 @@
 @using ScadBundler.Core.Inlining
+@implements IDisposable
 @inject WorkspaceController Controller
 
-<details class="options">
+<details class="options" open="@Controller.IsLargeProject">
     <summary>Options</summary>
 
     <div class="options-body">
+        @if (Controller.IsLargeProject)
+        {
+            <div class="opt-apply" role="group" aria-label="Apply options and bundle">
+                <button type="button" class="opt-apply-btn" disabled="@(!Controller.NeedsBundle)"
+                        @onclick="Apply">@ApplyLabel</button>
+                <span class="opt-apply-note">@ApplyNote</span>
+            </div>
+        }
+
         <label class="opt-row">
             <input type="checkbox" checked="@(!Opts.BundleLicenses)" @onchange="OnProvenanceChanged" />
             <span>
@@ -91,8 +101,37 @@
         (CollisionStrategy.KeepLast, "Keep last — last definition wins (OpenSCAD default)"),
     ];
 
-    // The live options the controller holds; every handler emits a `with`-modified copy back through it.
-    private WebBundleOptions Opts => Controller.Options;
+    // The options the panel edits. In a small project these are the applied options (SetOptions re-bundles
+    // live); in a large one they are the *pending* (staged) options the Apply button later bundles with —
+    // either way the controller's PendingOptions is the live, panel-bound copy.
+    private WebBundleOptions Opts => Controller.PendingOptions;
+
+    // The manual "Bundle" button (large projects only): "Apply & bundle" when options changed since the last
+    // bundle, "Bundle now" when only the file set is awaiting its first/next bundle.
+    private string ApplyLabel => Controller.OptionsDirty ? "Apply options & bundle" : "Bundle now";
+
+    // The status beside the Bundle button. Order matters: a complete, current bundle reports "up to date"
+    // only after we've ruled out "still working", "ready to bundle", and "not bundleable yet" — so we never
+    // claim a bundle is current when none has been produced (e.g. pre-analysis, or blocked on missing refs).
+    private string ApplyNote
+    {
+        get
+        {
+            if (Controller.IsBusy)
+            {
+                return "Working…";
+            }
+
+            if (Controller.NeedsBundle)
+            {
+                return "Large project — set your options, then bundle once.";
+            }
+
+            return Controller.CanBundle ? "Bundle is up to date." : "Resolve the files needed above, then bundle.";
+        }
+    }
+
+    private void Apply() => Controller.ApplyOptions();
 
     // "Remove provenance" is the inverse of BundleLicenses (default keeps attribution).
     private void OnProvenanceChanged(ChangeEventArgs e) =>
@@ -116,4 +155,12 @@
         Controller.SetOptions(Opts with { PreserveComments = AsBool(e) });
 
     private static bool AsBool(ChangeEventArgs e) => e.Value is true || e.Value?.ToString() == "true";
+
+    // Subscribe directly so the staged-options affordance + Bundle button track controller state even when a
+    // change originates elsewhere (an analyze finishing, a file dropped) — not only off App's render cascade.
+    protected override void OnInitialized() => Controller.Changed += OnChanged;
+
+    private void OnChanged() => InvokeAsync(StateHasChanged);
+
+    public void Dispose() => Controller.Changed -= OnChanged;
 }

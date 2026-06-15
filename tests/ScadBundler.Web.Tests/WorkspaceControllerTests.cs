@@ -1,3 +1,4 @@
+using ScadBundler.Core.Inlining;
 using ScadBundler.Web.State;
 using Xunit;
 
@@ -224,5 +225,128 @@ public sealed class WorkspaceControllerTests
 
         Assert.Equal(BusyPhase.Idle, controller.BusyPhase);
         Assert.False(controller.IsBusy);
+    }
+
+    // ---- Slice W5 §C: large-project deferred bundle + staged options ----
+
+    // A project over the byte threshold (one big file), so AutoBundle is off: it analyzes live but defers the
+    // bundle until ApplyOptions. The leading comment + a top-level cube make it a complete, bundleable root.
+    private static async Task<WorkspaceController> LargeProjectAsync()
+    {
+        var controller = new WorkspaceController { DebounceMs = 0 };
+        string big = "// " + new string('x', WorkspaceController.LargeProjectByteThreshold) + "\ncube(1);\n";
+        controller.AddOrReplace([new UploadedFile("main.scad", big)]);
+        await controller.Recomputing;
+        return controller;
+    }
+
+    [Fact]
+    public async Task SmallProject_AutoBundles_AndAppliesOptionsImmediately()
+    {
+        var controller = new WorkspaceController { DebounceMs = 0 };
+        controller.AddOrReplace([new UploadedFile("main.scad", "cube(1);\n")]);
+        await controller.Recomputing;
+
+        Assert.False(controller.IsLargeProject);
+        Assert.True(controller.AutoBundle);
+        Assert.NotNull(controller.Bundle);                       // bundled live
+        Assert.False(controller.NeedsBundle);                    // nothing deferred in a small project
+
+        controller.SetOptions(controller.PendingOptions with { Hardening = HardeningProfile.Minify });
+        await controller.Recomputing;
+
+        Assert.Equal(HardeningProfile.Minify, controller.Options.Hardening);        // applied immediately
+        Assert.Equal(HardeningProfile.Minify, controller.PendingOptions.Hardening);
+        Assert.False(controller.OptionsDirty);
+    }
+
+    [Fact]
+    public async Task LargeProject_AnalyzesButDefersBundle_OnStructuralChange()
+    {
+        WorkspaceController controller = await LargeProjectAsync();
+
+        Assert.True(controller.IsLargeProject);
+        Assert.False(controller.AutoBundle);
+        Assert.NotNull(controller.Analysis);                     // analyzed live (drives the file list/tree)
+        Assert.True(controller.CanBundle);                       // complete and ready…
+        Assert.Null(controller.Bundle);                          // …but not bundled — deferred
+        Assert.True(controller.NeedsBundle);                     // the UI prompts a manual Bundle
+        Assert.Equal(BusyPhase.Idle, controller.BusyPhase);
+    }
+
+    [Fact]
+    public async Task LargeProject_SetOptions_StagesWithoutBundling()
+    {
+        WorkspaceController controller = await LargeProjectAsync();
+
+        controller.SetOptions(controller.PendingOptions with { Hardening = HardeningProfile.Minify });
+        await controller.Recomputing;   // no new recompute is scheduled; awaiting the last (completed) task is safe
+
+        Assert.Equal(HardeningProfile.Minify, controller.PendingOptions.Hardening); // staged
+        Assert.Equal(HardeningProfile.None, controller.Options.Hardening);          // not applied
+        Assert.True(controller.OptionsDirty);
+        Assert.Null(controller.Bundle);                                             // still not bundled
+    }
+
+    [Fact]
+    public async Task LargeProject_ApplyOptions_BundlesOnce_WithStagedOptions()
+    {
+        WorkspaceController controller = await LargeProjectAsync();
+        controller.SetOptions(controller.PendingOptions with { Hardening = HardeningProfile.Minify });
+
+        controller.ApplyOptions();
+        await controller.Recomputing;
+
+        Assert.Equal(HardeningProfile.Minify, controller.Options.Hardening);        // staged options applied
+        Assert.False(controller.OptionsDirty);
+        Assert.NotNull(controller.Bundle);
+        Assert.True(controller.Bundle!.Ok);
+        Assert.False(controller.NeedsBundle);                                       // up to date now
+    }
+
+    [Fact]
+    public async Task OptionsOnlyApply_ReusesAnalysis_SkippingTheAnalyzePhase()
+    {
+        // Slice W5 §C2: with nothing structural changed, an options re-bundle reuses the cached analysis and
+        // never re-enters the Analyzing phase.
+        var controller = new WorkspaceController { DebounceMs = 0 };
+        controller.AddOrReplace([new UploadedFile("main.scad", "cube(1);\n")]);
+        await controller.Recomputing;       // initial analyze + bundle; structure now clean
+
+        var phases = new List<BusyPhase>();
+        controller.Changed += () => phases.Add(controller.BusyPhase);
+
+        controller.SetOptions(controller.PendingOptions with { Hardening = HardeningProfile.Minify });
+        await controller.Recomputing;
+
+        Assert.Equal([BusyPhase.Bundling, BusyPhase.Idle], phases);  // no Analyzing — analysis reused
+    }
+
+    [Fact]
+    public void IsLargeProject_TrueAboveFileCountThreshold()
+    {
+        var controller = new WorkspaceController { DebounceMs = 0 };
+        var files = new List<UploadedFile>();
+        for (int i = 0; i <= WorkspaceController.LargeProjectFileThreshold; i++)  // threshold + 1 files
+        {
+            files.Add(new UploadedFile($"f{i}.scad", "a = 1;\n"));
+        }
+
+        controller.AddOrReplace(files);
+
+        Assert.True(controller.IsLargeProject);
+        Assert.False(controller.AutoBundle);
+    }
+
+    [Fact]
+    public void IsLargeProject_TrueAboveByteThreshold_WithASingleFile()
+    {
+        var controller = new WorkspaceController { DebounceMs = 0 };
+
+        controller.AddOrReplace(
+            [new UploadedFile("main.scad", new string('x', WorkspaceController.LargeProjectByteThreshold + 1))]);
+
+        Assert.Equal(1, controller.UploadCount);   // one file, but over the byte threshold
+        Assert.True(controller.IsLargeProject);
     }
 }

@@ -6,20 +6,99 @@ should be able to resume from here with no other context.
 
 ---
 
-## ▶ Next session — start here: **Slice W5 §A1/A2 — the organize UI** (deeper perf = §C2/§C3)
+## ▶ Next session — start here: **Slice W5 §A1/A2 — the organize UI** (Web Worker = the remaining perf)
 
-**W0 + W1 + W2 + W3 are done and green; Slice W5 §C1 (responsiveness) just landed (see below).** v1 is
-feature-complete and shipping. Per the [Slice-W5](slices/Slice-W5-Large-Project-UX.md) sequencing, the next
-highest impact-per-effort is **Part A — A1 (editable structure tree) + A2 ("put these under a folder" bulk
-action on drop)**: the genuine structure-less / basename-collision cases §C1 did *not* touch (it made big
-projects *feel* alive, not *fast* or *resolvable*). All of Part A is expressible as `UploadedFile.Name`
-edits (move = `AddOrReplace` new name + `Remove` old) — **no new Core primitive**.
+**W0 + W1 + W2 + W3 + W5 §C1 are done and green; this session landed the options-responsiveness UX + §C2
+(redundant-load elimination) + §C3 (large-project expectations note) — see below.** v1 is feature-complete and
+shipping. Per the [Slice-W5](slices/Slice-W5-Large-Project-UX.md) sequencing, the next highest
+impact-per-effort is **Part A — A1 (editable structure tree) + A2 ("put these under a folder" bulk action on
+drop)**: the genuine structure-less / basename-collision cases the responsiveness work did *not* touch (it made
+big projects *usable*, not *resolvable*). All of Part A is expressible as `UploadedFile.Name` edits (move =
+`AddOrReplace` new name + `Remove` old) — **no new Core primitive**. **(A1/A2 were intentionally deferred this
+session — the better path-guessing already in place means we've not yet hit a case the analyzer heuristics get
+wrong, so responsiveness was the higher priority.)**
 
-The deeper perf work remains a follow-up: **§C2** (share one parse across analyzer + loader; incremental
-recompute; lazy emit) is the real *speed* win but is **Core-touching** → **stop and ask before starting it**.
-**§C3** (a Web Worker for a truly non-blocking pipeline) is the robust fix for the very largest projects;
-§C1's yield-based approach is the cheaper first step that already kills the "frozen" symptom for the analyze
-phase. **W4 stays deferred. Do not change Core semantics or add a Core dependency without asking.**
+Remaining perf follow-ups (both bigger, both gated on need): **the deeper half of §C2** — a parse cache
+*shared across analyzer + loader* (parse each file once per recompute) and *incremental* caching *across*
+recomputes (an edit to the root re-parses only the root, not the 40 unchanged libs) — needs `SourceLoader` to
+take an injectable parse cache, a broader **Core-touching** change → **stop and ask before starting it**. And
+**the Web Worker** (a second WASM runtime so the UI thread never blocks *during* a phase) is the robust fix for
+the very largest projects — note the Slice-W5 doc files this under **§C1's "worker offload"**, *not* §C3 (§C3
+is the expectations note, now done). **Naming caveat:** the older §C1 section below (2026-06-14) still calls the
+worker "§C3 (Web Worker)" / "§C3 is the full fix"; read those as the §C1 offload — they predate this
+clarification and were left intact as historical record. **W4 stays deferred. Do not change Core semantics or
+add a Core dependency without asking.**
+
+---
+
+## Slice W5 §C2 + §C3 + options responsiveness — done (2026-06-15)
+
+**The big-project freeze fix: set options before paying for one bundle, and do one less load per bundle.**
+The pain after §C1 was that **every option toggle (and every drop/edit) re-ran the whole pipeline**, so a
+BOSL2-scale project froze for seconds *per option* — minutes to set a handful. Three changes fix it:
+
+1. **Manual-bundle mode for large projects (the responsiveness ask).** A project over a size threshold
+   (`IsLargeProject`: > 12 files **or** > 256 KB total) switches to **analyze-live / bundle-on-demand**:
+   structural changes still re-analyze (the cheap phase that drives the file list/tree) but the **bundle is
+   deferred**, and an **option change only stages** into `PendingOptions`. The user sets every option, then
+   clicks **Bundle** once (`ApplyOptions`). Small projects keep the live bundle-on-every-change behaviour
+   (`AutoBundle`). The options panel is now shown **as soon as files are uploaded** (gated on `UploadCount`,
+   moved above `OutputPanel`) so options are settable *before* the first bundle.
+2. **§C2 — one fewer load per bundle (Core-touching, byte-identical).** `WebBundler.ComputeStats` used to run a
+   **second `SourceLoader.Load`** just to count inlined files. The analyzer already loads that graph, so
+   `ProjectAnalysis` now carries **`FilesInlined`** and `WebBundler.Bundle` takes an optional precomputed count
+   (`null` ⇒ recompute, so the CLI/parity callers are unchanged). The controller passes `Analysis.FilesInlined`
+   → the bundle phase no longer re-loads. Additionally, an **options-only re-bundle reuses the cached analysis**
+   (`_structureDirty` / `_analyzedFs`) and skips the analyze phase entirely.
+3. **§C3 — set expectations.** A dismissible `LargeProjectNotice` (shown for `IsLargeProject`) explains the
+   deferred-bundle flow ("set your options, then press Bundle") and links to the instant CLI. (The Slice-W5
+   doc's §C3 *is* this note; the Web Worker is its §C1 "offload", still deferred.)
+
+**Core change is additive + byte-identical:** `ProjectAnalysis.FilesInlined` (defaulted) + an optional
+`WebBundler.Bundle` param. **No new `SBxxxx`; no Core dependency; bundle bytes unchanged** (new
+`WebBundlerTests` proves the precomputed path == the recount path byte-for-byte; `BundleParityTests` green).
+Build **0 warnings**; **804 tests green** — Core **716** [+1], CLI 24, **Web 64** [+11]; Integration 35 is
+OpenSCAD-gated (self-skips here) and unaffected (bundle bytes unchanged).
+
+### Files changed
+- **Core** — `Workspace/ProjectAnalysis.cs` (+`FilesInlined`), `Workspace/ProjectAnalyzer.cs` (computes it off
+  the graph it already loads), `Workspace/WebBundler.cs` (optional precomputed count; `CountInlinedFiles`).
+- **Web** — `State/WorkspaceController.cs` (`PendingOptions`/`Options` split + `OptionsDirty`; `IsLargeProject`/
+  `AutoBundle`; `CanBundle`/`NeedsBundle`; `ApplyOptions`; `_structureDirty`/`_analyzedFs` reuse; the `Schedule`/
+  `RecomputeAsync` `bundle` flag; internal size thresholds), `Components/OptionsPanel.razor` (binds
+  `PendingOptions`; Apply/Bundle button when large; subscribes to `Changed`), `Components/LargeProjectNotice.razor`
+  (new), `App.razor` (options shown on `UploadCount > 0` above `OutputPanel`; the notice; still-need now gated on
+  `!CanBundle`), `wwwroot/css/app.css` (`.opt-apply*`, `.large-notice*`).
+- **Tests** — `WorkspaceControllerTests` (+7: small auto-applies; large defers/stages/applies; options-only apply
+  skips analyze; thresholds), `OptionsPanelTests` (+2: no button when small; stage-then-apply when large),
+  `LargeProjectNoticeTests` (new, +2), `WebBundlerTests` (+1: §C2 precomputed == recount, byte-identical).
+
+### Verified in-browser (dev server, DOM-eval)
+Small project → live bundle, no Bundle button, no notice. Large project (one 300 KB file) → notice shown,
+options auto-open, "Bundle now" enabled, **no auto-bundle**; picking Minify *stages* it (label → "Apply options
+& bundle", still no output); clicking **Bundle** produces the output once and the button settles to "Bundle is
+up to date". No console errors. (Screenshots still time out on this app — DOM-eval is the reliable check; W1 note.)
+
+### Gotchas the next session must know
+- **Size-derived mode switch.** `IsLargeProject` (`WorkspaceController.LargeProjectFileThreshold` = 12 /
+  `LargeProjectByteThreshold` = 256 KB, both `internal`) flips a project between live (`AutoBundle`) and manual
+  (`ApplyOptions`) bundling; a drop that crosses the threshold changes the mode for the *next* intent. Tests use
+  the `internal` thresholds (InternalsVisibleTo) to build a deterministic "large" project (one big file).
+- **`SetOptions` is now stage-aware.** Small project → applies + bundles (as before); large project → stages
+  into `PendingOptions` and fires `Changed` only (no recompute). `ApplyOptions` commits `PendingOptions →
+  Options` and bundles. `OptionsDirty`/`NeedsBundle` drive the button label/enabled state. Existing
+  `OptionsPanelTests` still pass because their 2-file projects are small (auto-apply).
+- **Bundle is nulled on a deferred/blocked recompute.** A large structural change re-analyzes and sets
+  `Bundle = null` (stale) so the UI prompts; the still-need line is gated on `!CanBundle` (not `Bundle is null`)
+  so a complete-but-not-yet-bundled large project doesn't read "Still need 0 files".
+- **§C2 count must stay in lockstep.** `ProjectAnalyzer.FilesInlined` and `WebBundler.CountInlinedFiles` use the
+  *same* formula (distinct non-root `Source.Path` in the load graph); loading is independent of the collision/
+  licence/hardening options, so the precomputed count equals the recount. If a bundle option ever changes
+  *which files load*, the precompute is wrong — re-check `Stats_FilesInlined_PrecomputedReusesAnalyzerCount`.
+- **`OptionsPanel` now subscribes to `Changed`** (like `EngineStatus`) so the Bundle button tracks state changed
+  elsewhere (e.g. analyze finishing); it's `IDisposable` — keep the unsubscribe.
+- **`_analyzedFs` reuse is guarded by `_structureDirty`.** Only an options-only apply (structure clean) skips the
+  analyze; any structural intent sets `_structureDirty = true`, forcing a re-analyze before the next bundle.
 
 ---
 
