@@ -28,11 +28,18 @@ phase. **W4 stays deferred. Do not change Core semantics or add a Core dependenc
 **Responsiveness: yield-based progress, off-the-render-path recompute, and debounce/cancel.**
 `WorkspaceController.Recompute` was **synchronous on the UI thread**, so a BOSL2-scale project froze the page
 with no feedback (the browser "Page isn't responding" prompt). It is now an **async, phased** recompute that
-yields to the browser between phases (so it paints and the watchdog resets) and surfaces a **determinate
+yields to the browser between phases (so it paints and stays responsive across the boundary — a single very
+large phase can still be slow; see the "feel alive, not fast" note below) and surfaces a **determinate
 progress indicator**; rapid intents are **coalesced** (each cancels the prior in-flight recompute). **Core
 untouched; no Core dependency added; no new `SBxxxx` codes; bundle output byte-identical (parity green).**
-Build **0 warnings**; **826 tests green** — Core 715, CLI 24, **Web 52** [+6] verified locally; Integration
+Build **0 warnings**; **827 tests green** — Core 715, CLI 24, **Web 53** [+7] verified locally; Integration
 35 is OpenSCAD-gated (self-skips here) and unaffected (bundle bytes unchanged).
+
+> **Post-merge review polish (2026-06-14, PR #17):** `Dispose()` now settles `BusyPhase` to `Idle` (a
+> recompute parked at a phase boundary is cancelled but won't reach `Idle` on its own); a
+> `prefers-reduced-motion` guard stops the pulsing dot + progress-fill transition; and the
+> `WorkspaceController` doc no longer claims the "page unresponsive" prompt *never* shows (single-threaded —
+> one very large phase can still be slow; §C3 is the full fix).
 
 ### The change (all in `web/ScadBundler.Web/`, no Core edits)
 - **`State/WorkspaceController.cs`** — `Recompute()` → private **`RecomputeAsync(bool debounce, CancellationToken)`**

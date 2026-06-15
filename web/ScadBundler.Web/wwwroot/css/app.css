@@ -130,6 +130,18 @@ code {
     color: var(--muted);
 }
 
+/* Honor reduced-motion: stop the pulsing dot and the progress-fill slide on phase changes. */
+@media (prefers-reduced-motion: reduce) {
+    .engine-status.loading .dot,
+    .engine-status.busy .dot {
+        animation: none;
+    }
+
+    .engine-progress::-webkit-progress-value {
+        transition: none;
+    }
+}
+
 /* ---- Drop zone ---- */
 .dropzone {
     border: 2px dashed var(--border);
