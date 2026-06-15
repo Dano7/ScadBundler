@@ -15,7 +15,7 @@
 
         <MainFileEditor Root="@Controller.Root" RootText="@Controller.RootText" />
 
-        @if (Controller.Root is not null && Controller.Bundle is null)
+        @if (Controller.Root is not null && !Controller.CanBundle)
         {
             <p class="still-need">@StillNeedMessage</p>
         }
@@ -23,12 +23,19 @@
         <ProblemsPanel Diagnostics="CurrentDiagnostics" />
     }
 
-    <OutputPanel Result="Controller.Bundle" RootPath="@Controller.Root" />
-
-    @if (Controller.Analysis is not null)
+    @* Options are shown as soon as files are uploaded — before the (possibly slow) bundle — so a large
+       project can be configured up front, then bundled once via the panel's Bundle button (Slice W5 §C). *@
+    @if (Controller.UploadCount > 0)
     {
+        @if (Controller.IsLargeProject)
+        {
+            <LargeProjectNotice />
+        }
+
         <OptionsPanel />
     }
+
+    <OutputPanel Result="Controller.Bundle" RootPath="@Controller.Root" />
 </div>
 
 @code {

@@ -670,6 +670,81 @@ button:disabled {
     font-size: .82rem;
 }
 
+/* ---- Apply & bundle (large-project manual bundle, Slice W5 §C) ---- */
+.opt-apply {
+    display: flex;
+    align-items: center;
+    gap: .75rem;
+    flex-wrap: wrap;
+    padding: .65rem .75rem;
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+}
+
+.opt-apply-btn {
+    flex: 0 0 auto;
+    padding: .55rem 1.1rem;
+    font-size: .95rem;
+    font-weight: 600;
+    color: #0f1220;
+    background: var(--accent);
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+}
+
+.opt-apply-btn:disabled {
+    opacity: .5;
+    cursor: not-allowed;
+}
+
+.opt-apply-note {
+    color: var(--muted);
+    font-size: .82rem;
+}
+
+/* ---- Large-project notice (Slice W5 §C3 — set expectations) ---- */
+.large-notice {
+    display: flex;
+    align-items: flex-start;
+    gap: .75rem;
+    margin-top: 1.5rem;
+    padding: .85rem 1rem;
+    background: var(--panel-2);
+    border: 1px solid var(--warn);
+    border-left-width: 4px;
+    border-radius: 8px;
+}
+
+.large-notice-body {
+    flex: 1 1 auto;
+    color: var(--ink);
+    font-size: .9rem;
+    line-height: 1.45;
+}
+
+.large-notice-body a {
+    color: var(--accent);
+}
+
+.large-notice-dismiss {
+    flex: 0 0 auto;
+    width: 1.75rem;
+    height: 1.75rem;
+    font-size: 1.1rem;
+    line-height: 1;
+    color: var(--muted);
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    cursor: pointer;
+}
+
+.large-notice-dismiss:hover {
+    color: var(--ink);
+}
+
 .options-advanced {
     border: 1px solid var(--border);
     border-radius: 8px;

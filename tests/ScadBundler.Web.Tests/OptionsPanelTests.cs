@@ -162,4 +162,49 @@ public sealed class OptionsPanelTests : TestContext
         Assert.NotNull(controller.Bundle);
         Assert.NotEqual(before, controller.Bundle!.Text);
     }
+
+    // ---- Slice W5 §C: large-project manual Bundle button ----
+
+    // A project over the byte threshold (one big file) so the panel is in manual-bundle mode: it shows the
+    // "Apply & bundle" button and option changes stage rather than re-bundle.
+    private async Task<(WorkspaceController Controller, IRenderedComponent<OptionsPanel> Cut)> RenderLargeAsync()
+    {
+        var controller = new WorkspaceController { DebounceMs = 0 };
+        string big = "// " + new string('x', WorkspaceController.LargeProjectByteThreshold) + "\ncube(1);\n";
+        controller.AddOrReplace([new UploadedFile("main.scad", big)]);
+        await controller.Recomputing;
+        Services.AddSingleton(controller);
+        return (controller, RenderComponent<OptionsPanel>());
+    }
+
+    [Fact]
+    public async Task SmallProject_ShowsNoApplyButton()
+    {
+        (_, IRenderedComponent<OptionsPanel> cut) = await RenderAsync();
+        Assert.Empty(cut.FindAll(".opt-apply-btn"));             // small projects bundle live, no manual button
+    }
+
+    [Fact]
+    public async Task LargeProject_StagesOption_ThenBundlesOnApply()
+    {
+        (WorkspaceController controller, IRenderedComponent<OptionsPanel> cut) = await RenderLargeAsync();
+
+        // Deferred: complete but not yet bundled, so the manual Bundle button is present and enabled.
+        Assert.Null(controller.Bundle);
+        Assert.False(cut.Find(".opt-apply-btn").HasAttribute("disabled"));
+
+        // Picking Minify only stages it — the applied options stay None and no bundle is produced yet.
+        Radio(cut, Minify).Change(true);
+        cut.WaitForAssertion(() => Assert.True(controller.OptionsDirty), Settle);
+        Assert.Equal(HardeningProfile.None, controller.Options.Hardening);
+        Assert.Null(controller.Bundle);
+
+        // Clicking Apply commits the staged options and bundles exactly once.
+        cut.Find(".opt-apply-btn").Click();
+        await controller.Recomputing;
+
+        Assert.Equal(HardeningProfile.Minify, controller.Options.Hardening);
+        Assert.NotNull(controller.Bundle);
+        Assert.True(controller.Bundle!.Ok);
+    }
 }

@@ -137,6 +137,27 @@ public sealed class WebBundlerTests
     }
 
     [Fact]
+    public void Stats_FilesInlined_PrecomputedReusesAnalyzerCount_ByteIdentical()
+    {
+        // Slice W5 §C2: the analyzer already loaded the graph, so the bundle phase can take its FilesInlined
+        // count instead of re-loading. The precomputed path must match the self-recount exactly — same count,
+        // same bytes.
+        (InMemoryFileSystem fs, ProjectAnalysis analysis) = ProjectAnalyzer.Analyze(
+        [
+            new UploadedFile("main.scad", "include <a.scad>\nuse <b.scad>\ncube(1);\nb();"),
+            new UploadedFile("a.scad", "x = 1;"),
+            new UploadedFile("b.scad", "module b() sphere(1);"),
+        ]);
+
+        WebBundleResult recount = WebBundler.Bundle(fs, analysis.Root!, new WebBundleOptions());
+        WebBundleResult reused = WebBundler.Bundle(fs, analysis.Root!, new WebBundleOptions(), analysis.FilesInlined);
+
+        Assert.Equal(2, analysis.FilesInlined);
+        Assert.Equal(recount.Stats.FilesInlined, reused.Stats.FilesInlined);
+        Assert.Equal(recount.Text, reused.Text);
+    }
+
+    [Fact]
     public void Stats_DefinitionsRemoved_ReadsTreeShakenCountUnderMinify()
     {
         WebBundleResult result = Bundle(

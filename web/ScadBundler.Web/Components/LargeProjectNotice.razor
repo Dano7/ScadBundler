@@ -1,0 +1,32 @@
+@inject WorkspaceController Controller
+
+@*
+  Slice W5 §C3 — set expectations. On a large project (BOSL2-scale) the bundle phase runs for several seconds
+  in single-threaded WASM; this honest, dismissible note explains the deferred-bundle flow ("set options, then
+  Bundle") and points at the instant command-line tool. Shown only for IsLargeProject; the bundle isn't run on
+  every change for these projects (see WorkspaceController), so without this note the deferred Bundle button
+  would be unexplained. role="note" + aria-live keeps it announced without stealing focus.
+*@
+@if (!_dismissed)
+{
+    <aside class="large-notice" role="note" aria-live="polite">
+        <div class="large-notice-body">
+            <strong>Large project.</strong> Bundling this many files can take a few seconds in your browser,
+            so it doesn't re-run on every change. Set your options below, then press
+            <strong>Bundle</strong> once. The command-line tool is instant if you have it —
+            <a href="@CliUrl" target="_blank" rel="noopener noreferrer">get <code>scadbundler</code></a>.
+        </div>
+        <button type="button" class="large-notice-dismiss" aria-label="Dismiss large-project notice"
+                @onclick="Dismiss">×</button>
+    </aside>
+}
+
+@code {
+    // The command-line tool's home (install + usage). Opens in a new tab.
+    private const string CliUrl = "https://github.com/Dano7/ScadCombiner#readme";
+
+    // One-time per session: once dismissed it stays gone until reload (a page-load is a fresh session).
+    private bool _dismissed;
+
+    private void Dismiss() => _dismissed = true;
+}

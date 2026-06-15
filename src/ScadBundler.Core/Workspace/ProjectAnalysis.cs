@@ -22,6 +22,10 @@ namespace ScadBundler.Core.Workspace;
 /// at the <i>alias</i> path the loader looks for (<c>&lt;BOSL2/std.scad&gt;</c> → <c>/proj/BOSL2/std.scad</c>,
 /// or a case-folded path), and this maps that alias back to the real upload (<c>/proj/std.scad</c>) — so the
 /// used/unused view can tell an aliased-but-reached upload from a genuinely orphaned one.</param>
+/// <param name="FilesInlined">The number of distinct non-root files in the load graph — exactly what
+/// <see cref="WebBundler"/> would report as <c>BundleStats.FilesInlined</c>. The analyzer already loads the
+/// graph (for <see cref="Tree"/>), so surfacing this lets the bundle phase reuse it instead of re-loading
+/// just to count (Slice W5 §C2). <c>0</c> when <see cref="Root"/> is <c>null</c>.</param>
 public sealed record ProjectAnalysis(
     IReadOnlyList<string> EntryPointCandidates,
     string? InferredRoot,
@@ -30,4 +34,5 @@ public sealed record ProjectAnalysis(
     IReadOnlyList<MissingReference> Missing,
     IReadOnlyList<AmbiguousReference> Ambiguous,
     IReadOnlyList<DiagnosticDto> Diagnostics,
-    IReadOnlyDictionary<string, string> ResolvedOwners);
+    IReadOnlyDictionary<string, string> ResolvedOwners,
+    int FilesInlined = 0);

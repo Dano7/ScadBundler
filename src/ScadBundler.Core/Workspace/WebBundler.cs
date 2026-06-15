@@ -25,8 +25,12 @@ public static class WebBundler
     /// <param name="fs">The in-memory file system (built by <see cref="ProjectAnalyzer"/>).</param>
     /// <param name="root">The root file's virtual path.</param>
     /// <param name="options">The browser-facing bundle options.</param>
+    /// <param name="filesInlined">The distinct-non-root file count from a load the caller has already
+    /// performed (<see cref="ProjectAnalysis.FilesInlined"/>); when supplied, the stats pass reuses it instead
+    /// of re-loading the graph just to count (Slice W5 §C2). <c>null</c> ⇒ recompute it here.</param>
     /// <returns>The bundle text (or <c>""</c> when blocked by an Error diagnostic), diagnostics, and stats.</returns>
-    public static WebBundleResult Bundle(InMemoryFileSystem fs, string root, WebBundleOptions options)
+    public static WebBundleResult Bundle(
+        InMemoryFileSystem fs, string root, WebBundleOptions options, int? filesInlined = null)
     {
         ArgumentNullException.ThrowIfNull(fs);
         ArgumentNullException.ThrowIfNull(root);
@@ -56,7 +60,7 @@ public static class WebBundler
         // An Error diagnostic produces no output (the CLI's exit-1 behavior).
         string text = hasError ? string.Empty : Emitter.Emit(result.Bundled, emitOptions);
 
-        BundleStats stats = ComputeStats(fs, root, bundleOptions, result.Diagnostics, text);
+        BundleStats stats = ComputeStats(fs, root, bundleOptions, result.Diagnostics, text, filesInlined);
         IReadOnlyList<DiagnosticDto> diagnostics = [.. result.Diagnostics.Select(ToDto)];
 
         return new WebBundleResult(text, !hasError, diagnostics, stats);
@@ -67,16 +71,13 @@ public static class WebBundler
         string root,
         BundleOptions bundleOptions,
         IReadOnlyList<Diagnostic> diagnostics,
-        string text)
+        string text,
+        int? precomputedFilesInlined)
     {
-        // FilesInlined: distinct non-root files in the load graph (exactly what --verbose reports).
-        LoadGraph graph = SourceLoader.Load(root, bundleOptions, fs);
-        string rootPath = graph.Root.Source.Path;
-        int filesInlined = graph.ByAbsolutePath.Values
-            .Select(f => f.Source.Path)
-            .Where(p => !string.Equals(p, rootPath, StringComparison.Ordinal))
-            .Distinct(StringComparer.Ordinal)
-            .Count();
+        // FilesInlined: distinct non-root files in the load graph (exactly what --verbose reports). Reuse the
+        // caller's count when it has one (ProjectAnalyzer already loaded the graph, Slice W5 §C2); otherwise
+        // load once more to count — loading is independent of the collision/licence/hardening options.
+        int filesInlined = precomputedFilesInlined ?? CountInlinedFiles(SourceLoader.Load(root, bundleOptions, fs));
 
         int renames = diagnostics.Count(d => d.Code == DiagnosticCode.NameRenamed);
         int normalizations = diagnostics.Count(d =>
@@ -89,6 +90,18 @@ public static class WebBundler
             renames,
             definitionsRemoved,
             normalizations);
+    }
+
+    // Distinct non-root files in the load graph — the same formula ProjectAnalyzer.FilesInlined uses, so a
+    // recount here (when the caller supplies no precomputed value) matches the precomputed path exactly.
+    private static int CountInlinedFiles(LoadGraph graph)
+    {
+        string rootPath = graph.Root.Source.Path;
+        return graph.ByAbsolutePath.Values
+            .Select(f => f.Source.Path)
+            .Where(p => !string.Equals(p, rootPath, StringComparison.Ordinal))
+            .Distinct(StringComparer.Ordinal)
+            .Count();
     }
 
     // The number of tree-shaken definitions, read from the SB5009 hardening summary message (the only
