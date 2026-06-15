@@ -210,4 +210,19 @@ public sealed class WorkspaceControllerTests
         Assert.Equal(BusyPhase.Idle, controller.BusyPhase);
         Assert.Contains("cube(2)", controller.Bundle!.Text);
     }
+
+    [Fact]
+    public void Dispose_SettlesBusyPhaseToIdle_WhenARecomputeIsStillParked()
+    {
+        // PhaseHoldMs parks the recompute in the analyze phase; BusyPhase is set synchronously before the
+        // first await, so it is observable the instant the intent returns.
+        var controller = new WorkspaceController { DebounceMs = 0, PhaseHoldMs = 60_000 };
+        controller.AddOrReplace([new UploadedFile("main.scad", "cube(1);\n")]);
+        Assert.Equal(BusyPhase.Analyzing, controller.BusyPhase);
+
+        controller.Dispose();                             // cancels the parked recompute (it won't reach Idle itself)
+
+        Assert.Equal(BusyPhase.Idle, controller.BusyPhase);
+        Assert.False(controller.IsBusy);
+    }
 }

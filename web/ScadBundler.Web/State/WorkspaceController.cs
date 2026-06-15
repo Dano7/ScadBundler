@@ -7,8 +7,10 @@ namespace ScadBundler.Web.State;
 /// intents; it is the only thing that calls the <see cref="ProjectAnalyzer"/> / <see cref="WebBundler"/>
 /// facade. It never touches the DOM. Every intent schedules a recompute that runs <b>off the synchronous UI
 /// render path</b> — phased (analyze → bundle) with an <c>await Task.Yield()</c> between phases so the browser
-/// can paint a determinate <see cref="BusyPhase"/> indicator and never shows its "page unresponsive" prompt
-/// (Slice W5 §C1). Rapid intents are coalesced: each cancels the prior in-flight recompute (cooperative —
+/// can paint a determinate <see cref="BusyPhase"/> indicator and stay responsive across the phase boundary
+/// (Slice W5 §C1). It is still single-threaded: one very large phase can run long enough to trip the browser's
+/// "page unresponsive" prompt — the §C3 Web Worker is the full fix. Rapid intents are coalesced: each cancels
+/// the prior in-flight recompute (cooperative —
 /// there is no preemption on single-threaded WASM, so the token is checked <i>between</i> phases) and, except
 /// for the already-debounced <see cref="EditMainFile"/>, waits out a short <see cref="DebounceMs"/> window.
 /// </summary>
@@ -266,5 +268,9 @@ public sealed class WorkspaceController : IDisposable
         _recomputeCts?.Cancel();
         _recomputeCts?.Dispose();
         _recomputeCts = null;
+
+        // A recompute parked at a phase boundary is cancelled above but won't reach Idle on its own, so settle
+        // the phase here — leaving it Analyzing/Bundling post-teardown is a misleading state to observe.
+        BusyPhase = BusyPhase.Idle;
     }
 }
