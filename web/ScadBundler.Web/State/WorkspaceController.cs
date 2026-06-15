@@ -31,6 +31,10 @@ public sealed class WorkspaceController : IDisposable
     /// <summary>The current uploaded set, in first-seen order.</summary>
     public IReadOnlyList<UploadedFile> Uploads => [.. _uploads.Values];
 
+    /// <summary>The number of uploaded files — a non-allocating alternative to <c>Uploads.Count</c> (which
+    /// materializes a new list) for hot paths like the busy-phase status line.</summary>
+    public int UploadCount => _uploads.Count;
+
     /// <summary>The latest analysis, or <c>null</c> before the first upload.</summary>
     public ProjectAnalysis? Analysis { get; private set; }
 

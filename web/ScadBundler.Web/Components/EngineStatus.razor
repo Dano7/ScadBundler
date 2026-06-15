@@ -31,10 +31,13 @@
 
     private string StatusText => Controller.BusyPhase switch
     {
-        BusyPhase.Analyzing => $"Analyzing {Controller.Uploads.Count} file{(Controller.Uploads.Count == 1 ? "" : "s")}…",
+        BusyPhase.Analyzing => AnalyzingText(Controller.UploadCount),
         BusyPhase.Bundling => "Bundling…",
         _ => "Engine ready — your files stay on this device.",
     };
+
+    // Read the count once (UploadCount is allocation-free) and pluralize.
+    private static string AnalyzingText(int count) => $"Analyzing {count} file{(count == 1 ? "" : "s")}…";
 
     // Subscribe directly (rather than rely on App's render cascade) so the indicator re-renders on every
     // phase tick even when hosted under a parent that suppresses the cascade, and so it is testable in
