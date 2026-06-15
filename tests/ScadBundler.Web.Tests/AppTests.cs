@@ -16,11 +16,12 @@ namespace ScadBundler.Web.Tests;
 public sealed class AppTests : TestContext
 {
     [Fact]
-    public void MainFileEditor_AndDownloadName_BindToValues_NotLiteralExpressions()
+    public async Task MainFileEditor_AndDownloadName_BindToValues_NotLiteralExpressions()
     {
         JSInterop.Mode = JSRuntimeMode.Loose;          // DropZone's OnAfterRender calls JS; loose = no-op
-        var controller = new WorkspaceController();
+        var controller = new WorkspaceController { DebounceMs = 0 };
         controller.AddOrReplace([new UploadedFile("main.scad", "// my model\ncube(7);\n")]);
+        await controller.Recomputing;
         Services.AddSingleton(controller);
 
         IRenderedComponent<App> cut = RenderComponent<App>();

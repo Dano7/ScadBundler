@@ -6,92 +6,83 @@ should be able to resume from here with no other context.
 
 ---
 
-## ▶ Next session — start here: **Slice W5 §C1 — responsiveness (progress + off-thread)**
+## ▶ Next session — start here: **Slice W5 §A1/A2 — the organize UI** (deeper perf = §C2/§C3)
 
-**W0 + W1 + W2 + W3 are done and green; v1 is feature-complete and shipping.** The chosen next work is
-**Slice W5 §C1** — make the page *stay responsive* on big, real projects (BOSL2-scale). Today a large
-loose project (BOSL2: 57 files, ~2.9 MB bundle) blocks the UI thread long enough that the browser shows
-**"Page isn't responding… Wait / Exit Page"** with **no feedback**, so it *looks broken* even though it
-works. Full design: **[slices/Slice-W5-Large-Project-UX.md](slices/Slice-W5-Large-Project-UX.md) §C** (this
-session does **§C1 only** — yield-based progress + debounce/cancel; §C2 "do less work" and the §C3 Worker
-are follow-ups). **W4 stays deferred. Do not change Core semantics or add a Core dependency.**
+**W0 + W1 + W2 + W3 are done and green; Slice W5 §C1 (responsiveness) just landed (see below).** v1 is
+feature-complete and shipping. Per the [Slice-W5](slices/Slice-W5-Large-Project-UX.md) sequencing, the next
+highest impact-per-effort is **Part A — A1 (editable structure tree) + A2 ("put these under a folder" bulk
+action on drop)**: the genuine structure-less / basename-collision cases §C1 did *not* touch (it made big
+projects *feel* alive, not *fast* or *resolvable*). All of Part A is expressible as `UploadedFile.Name`
+edits (move = `AddOrReplace` new name + `Remove` old) — **no new Core primitive**.
 
-### What §C1 is (and is not)
-- **Goal:** the recompute runs **off the UI render path enough to paint**, and shows a **determinate
-  progress indicator** tied to pipeline phases, so the "unresponsive" prompt never appears and the user
-  sees what's happening. Plus **debounce + cancel** so a flurry of intents (multi-file drop, fast typing)
-  doesn't queue N full bundles.
-- **Not §C1:** reducing the actual CPU work (that's **§C2** — the analyzer parses every file for inference
-  and `WebBundler` re-loads/parses them again for the bundle; sharing one parse is the real *speed* win and
-  is **Core-side**, so defer + ask). A true second thread (**§C3** Web Worker) is the robust fix for the
-  very largest projects; §C1's yield-based approach is the high-impact-per-effort first step. Be honest in
-  the UI copy: §C1 makes it *feel* alive, §C2/§C3 make it *fast*.
+The deeper perf work remains a follow-up: **§C2** (share one parse across analyzer + loader; incremental
+recompute; lazy emit) is the real *speed* win but is **Core-touching** → **stop and ask before starting it**.
+**§C3** (a Web Worker for a truly non-blocking pipeline) is the robust fix for the very largest projects;
+§C1's yield-based approach is the cheaper first step that already kills the "frozen" symptom for the analyze
+phase. **W4 stays deferred. Do not change Core semantics or add a Core dependency without asking.**
 
-### The shape of the change (all in `web/ScadBundler.Web/`, no Core edits)
-The single chokepoint is **`State/WorkspaceController.Recompute()`** — today **synchronous**:
-`ProjectAnalyzer.Analyze(Uploads, _explicitRoot)` → gate on `Root != null && Missing+Ambiguous empty` →
-`WebBundler.Bundle(fs, root, Options)` → `Changed?.Invoke()`. Every intent (`AddOrReplace`/`Remove`/
-`SetRoot`/`SetOptions`/`EditMainFile`/`ResolveAmbiguous`) calls it inline.
+---
 
-1. **Make recompute async + phased.** Convert to `async Task RecomputeAsync(CancellationToken)` that runs
-   the coarse phases the Web already orchestrates — **(a) analyze** (`ProjectAnalyzer.Analyze`, which itself
-   does load+semantic) and **(b) bundle** (`WebBundler.Bundle`, which re-loads+inlines+emits) — with an
-   `await Task.Yield()` **before each phase** (and set the phase label first, fire `Changed`, *then* yield,
-   so the browser paints the new label before the blocking call). On WASM (single-threaded) `Task.Yield`
-   doesn't parallelize — it returns control to the browser event loop so it can **paint between phases**,
-   which resets the "unresponsive" watchdog. (See caveat below — one phase can still exceed the watchdog on
-   the biggest inputs; that's what §C3 fixes.)
-2. **Expose progress state.** Add to the controller a `BusyPhase` (e.g. `enum { Idle, Analyzing, Bundling }`
-   or a `string?`) + maybe a 0..1 fraction; set it before each phase and clear it at the end; the existing
-   `Changed` event already drives `App.razor`'s re-render. Surface it in **`EngineStatus.razor`** (today a
-   static "Engine ready" banner — the natural home for a `role="status"` busy/progress line) or a small new
-   `BusyIndicator` component. Determinate = phase N of M; if you want a bar, drive width off the fraction.
-3. **Debounce + cancel.** Coalesce rapid intents: keep a `CancellationTokenSource` field; each intent
-   cancels the previous and (optionally after a short debounce, ~100–150 ms, like `MainFileEditor`'s 200 ms)
-   starts a new `RecomputeAsync`. Check the token **after each `await Task.Yield()`** and bail (cooperative
-   cancellation — there is no preemption on WASM, so a token check between phases is the granularity you
-   get). This stops a 5-file drop from running 5 full BOSL2 bundles back-to-back.
+## Slice W5 §C1 — done (2026-06-14)
 
-### Key files
-- `State/WorkspaceController.cs` — the recompute owner (make async, phased, cancellable; add `BusyPhase`).
-  All intents currently `void … { …; Recompute(); }`; they become `async`-fire-and-forget or schedule the
-  debounced recompute. Keep `Analysis`/`Bundle`/`Root`/`Options`/`Uploads` semantics identical.
-- `App.razor` — already subscribes `Controller.Changed += OnChanged` → `InvokeAsync(StateHasChanged)`; no
-  structural change needed, it re-renders on each phase tick. Add the busy indicator into the layout if not
-  using `EngineStatus`.
-- `Components/EngineStatus.razor` — extend to show the busy phase (it already has `role="status"
-  aria-live="polite"`, which is exactly right for announcing "Analyzing… / Bundling…").
-- Tests: `tests/ScadBundler.Web.Tests/` — bUnit on the **controller** (drive an intent, assert `BusyPhase`
-  transitions and that a superseding intent cancels the prior), plus a render test that the indicator shows
-  during a (slow-stubbed) recompute. The heavy bUnit timing gotcha from W2 (`MainFileEditor`) applies:
-  generous `WaitForAssertion` windows because this suite can run beside the CPU-heavy integration suite.
+**Responsiveness: yield-based progress, off-the-render-path recompute, and debounce/cancel.**
+`WorkspaceController.Recompute` was **synchronous on the UI thread**, so a BOSL2-scale project froze the page
+with no feedback (the browser "Page isn't responding" prompt). It is now an **async, phased** recompute that
+yields to the browser between phases (so it paints and the watchdog resets) and surfaces a **determinate
+progress indicator**; rapid intents are **coalesced** (each cancels the prior in-flight recompute). **Core
+untouched; no Core dependency added; no new `SBxxxx` codes; bundle output byte-identical (parity green).**
+Build **0 warnings**; **826 tests green** — Core 715, CLI 24, **Web 52** [+6] verified locally; Integration
+35 is OpenSCAD-gated (self-skips here) and unaffected (bundle bytes unchanged).
 
-### Gotchas / facts the cold session needs
-- **Blazor WASM is single-threaded by default.** `await Task.Yield()`/`Task.Delay` does **not** run work in
-  parallel — it just lets the browser paint/handle events between synchronous chunks. So progress is real
-  but the page is still busy *during* a phase. For BOSL2 a single phase (the bundle/emit of ~2.9 MB) may
-  still run several seconds and *could* still trip the watchdog — set expectations in copy (§C3 note) and
-  treat the Web Worker as the real fix if it still bites after §C1.
-- **`Recompute` must keep its exact result semantics** — `Analysis`, `Bundle`, `Root` are read all over the
-  UI; only the *timing/threading* and the new `BusyPhase` change. Bundle output stays byte-identical to the
-  CLI (`BundleParityTests` must stay green).
-- **Cancellation is cooperative** — there's no Core hook to abort mid-bundle (and we won't add one; Core
-  stays sync/dependency-free). You can only cancel *between* the Web-orchestrated phases. That's enough to
-  stop queued recomputes; it won't interrupt one in-flight `WebBundler.Bundle`.
-- **Don't thread `IProgress`/`CancellationToken` into Core** for §C1 — keep the phasing in the Web layer
-  over the existing facade calls. If finer-grained progress is wanted later, that's a Core-touching change
-  (§C2 territory) → stop and ask first.
-- **`EditMainFile` already debounces at the `MainFileEditor` (200 ms) layer** — don't double-debounce it
-  into a sluggish editor; the controller-level debounce should be short (or skip debounce for `EditMainFile`
-  and only cancel-supersede).
+### The change (all in `web/ScadBundler.Web/`, no Core edits)
+- **`State/WorkspaceController.cs`** — `Recompute()` → private **`RecomputeAsync(bool debounce, CancellationToken)`**
+  scheduled by a new `Schedule(debounce)` that every intent calls. Two phases — **(1) analyze**
+  (`ProjectAnalyzer.Analyze`) then **(2) bundle** (`WebBundler.Bundle`, only when the set is complete) — each
+  sets the phase + fires `Changed` **before** an `await Task.Yield()`, so the browser paints the new label
+  before the blocking call. New public surface: **`BusyPhase` (enum `Idle/Analyzing/Bundling`)**, `IsBusy`,
+  `Recomputing` (the in-flight task — components fire-and-forget; tests `await` it), `DebounceMs`
+  (default 100; `EditMainFile` passes `debounce:false` — the editor already debounces 200 ms). Cancellation
+  is **cooperative** (token checked only *between* phases — no preemption on WASM; a superseded recompute
+  swallows its `OperationCanceledException`). The controller is now `IDisposable` (cancels its CTS). Internal
+  test seam **`PhaseHoldMs`** holds each busy phase so a render test can observe the indicator mid-flight.
+- **`State/BusyPhase.cs`** — the new phase enum.
+- **`Components/EngineStatus.razor`** — extended from a static "ready" banner to also announce the busy phase
+  ("Analyzing N files… → Bundling…") with a determinate `<progress>` bar, via its existing
+  `role="status" aria-live="polite"` region. It now injects the controller and **subscribes to `Changed`**
+  itself (re-renders per phase tick; testable in isolation).
+- **`wwwroot/css/app.css`** — `.engine-status.busy` (pulsing dot) + `.engine-progress` / `.engine-step`.
+- `App.razor` — **unchanged** (it already re-renders the tree on `Changed`).
 
-### Exit criteria for §C1
-- A BOSL2-scale loose project shows a visible **Analyzing… → Bundling…** progression and the browser
-  **"unresponsive" prompt does not appear** for the analyze phase (bundle phase improved; fully solved only
-  with §C3 — note it honestly).
-- Rapid intents coalesce (a 5-file drop runs **one** final recompute, not five).
-- **Bundle output and `SBxxxx` codes unchanged; CLI byte-parity preserved** (`BundleParityTests` green).
-- bUnit coverage on the controller's busy-phase transitions + cancellation; build 0 warnings.
+### Tests (`tests/ScadBundler.Web.Tests/`)
+- **`WorkspaceControllerTests`** — existing tests made `async` (await `Recomputing`, `DebounceMs=0`); added
+  phase-transition (`[Analyzing,Bundling,Idle]` complete / `[Analyzing,Idle]` incomplete), **coalescing**
+  (5 rapid intents → 1 completed recompute), and **supersede-cancels-in-flight** tests.
+- **`EngineStatusTests`** (new) — idle shows "Engine ready" + no bar; a held recompute shows "Analyzing…" +
+  a `<progress>` bar, then settles back to "ready".
+- The other component suites (`FileList`/`OptionsPanel`/`ConflictPicker`/`App`/`MainFileEditor`) now `await`
+  the async recompute before asserting.
+
+### Gotchas the next session must know
+- **§C1 makes it *feel* alive, not *fast*.** WASM is single-threaded; `Task.Yield()` lets the browser paint
+  *between* phases but the page is still busy *during* a phase — the bundle/emit of a ~2.9 MB project can
+  still run several seconds and may still trip the watchdog. **§C3 (Web Worker)** is the real fix; **§C2**
+  (do less work) is the real *speed* win and is **Core-side**. The UI copy is honest about this.
+- **The recompute is async now — tests must `await Controller.Recomputing`** (don't assume synchronous
+  state) and set `DebounceMs=0`. A UI event raised *while a recompute is in flight* is **queued** on the
+  dispatcher, so **back-to-back** clicks/changes in a test must `await Recomputing` (or `WaitForState`)
+  between them, or the second handler won't have committed before the assertion (this bit `OptionsPanel`'s
+  multi-change tests). `Options`/`Uploads`/`Root` mutate synchronously *inside* the handler; only the
+  re-bundle is async.
+- **`Changed` now fires multiple times per recompute** (once per phase + once at idle), not once. Tests that
+  counted `changes == 1` were relaxed to "fired / final state".
+- **Coalescing is deterministic on WASM** (single SynchronizationContext) but races under plain xUnit (yield
+  continuations run on the thread pool, concurrently with a synchronous burst). The timing tests use
+  `PhaseHoldMs` to hold a phase and close that race; keep it if you touch them.
+- `EngineStatus` **subscribes to `Changed`** (unlike `OptionsPanel`, which leans on App's render cascade) so
+  it renders standalone — it's `IDisposable`; keep the unsubscribe if you refactor.
+- **Don't thread `IProgress`/`CancellationToken` into Core** — the phasing lives entirely in the Web layer
+  over the existing facade calls. Finer-grained (sub-phase) progress would be a Core-touching change (§C2) →
+  stop and ask.
 
 ---
 
