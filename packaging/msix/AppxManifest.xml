@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  ScadBundler MSIX manifest (full-trust desktop app + terminal alias).
+  Placeholders updated per release / per account:
+    - Identity/@Name and Publisher: assigned by Partner Center when you reserve the Store name.
+    - Identity/@Version: injected from the git tag by build-msix.ps1 (Major.Minor.Build.0).
+-->
+<Package
+  xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+  xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+  xmlns:uap3="http://schemas.microsoft.com/appx/manifest/uap/windows10/3"
+  xmlns:desktop="http://schemas.microsoft.com/appx/manifest/desktop/windows10"
+  xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+  IgnorableNamespaces="uap uap3 desktop rescap">
+
+  <Identity Name="DanOlsen.ScadBundler"
+            Publisher="CN=Dan Olsen"
+            Version="0.0.0.0"
+            ProcessorArchitecture="x64" />
+
+  <Properties>
+    <DisplayName>ScadBundler</DisplayName>
+    <PublisherDisplayName>Dan Olsen</PublisherDisplayName>
+    <Logo>Images\StoreLogo.png</Logo>
+    <Description>AST-based OpenSCAD file bundler: combine a multi-file OpenSCAD project into one .scad file.</Description>
+  </Properties>
+
+  <Dependencies>
+    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.17763.0" MaxVersionTested="10.0.22631.0" />
+  </Dependencies>
+
+  <Resources>
+    <Resource Language="en-us" />
+  </Resources>
+
+  <Applications>
+    <Application Id="ScadBundler" Executable="scadbundler.exe" EntryPoint="Windows.FullTrustApplication">
+      <uap:VisualElements
+        DisplayName="ScadBundler"
+        Description="AST-based OpenSCAD file bundler."
+        BackgroundColor="#1f6feb"
+        Square150x150Logo="Images\Square150x150Logo.png"
+        Square44x44Logo="Images\Square44x44Logo.png" />
+      <Extensions>
+        <uap3:Extension Category="windows.appExecutionAlias">
+          <uap3:AppExecutionAlias>
+            <desktop:ExecutionAlias Alias="scadbundler.exe" />
+          </uap3:AppExecutionAlias>
+        </uap3:Extension>
+      </Extensions>
+    </Application>
+  </Applications>
+
+  <Capabilities>
+    <rescap:Capability Name="runFullTrust" />
+  </Capabilities>
+</Package>

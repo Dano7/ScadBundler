@@ -1,0 +1,142 @@
+name: Release
+
+# Tag-driven distribution. Push a version tag (vX.Y.Z) to build and publish every artifact:
+#   * portable, self-contained, single-file binaries for all 6 platforms (cross-compiled here),
+#   * the dotnet-tool .nupkg (pushed to NuGet when NUGET_API_KEY is set),
+#   * an unsigned MSIX (preview),
+#   * a winget PR (when WINGET_TOKEN is set).
+# Run it manually (workflow_dispatch) from a branch to DRY RUN: it builds + uploads artifacts but
+# creates no GitHub Release and publishes nothing (the publish steps are gated on a version tag).
+# Versions come from the git tag via MinVer; nothing here hardcodes a version.
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch: {}
+
+permissions:
+  contents: write          # create the GitHub Release and upload assets
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  DOTNET_NOLOGO: 'true'
+  DOTNET_CLI_TELEMETRY_OPTOUT: 'true'
+
+jobs:
+  release:
+    name: Build & publish
+    runs-on: windows-latest
+    env:
+      NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+      WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0          # MinVer needs full history + tags
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Compute version
+        id: ver
+        shell: pwsh
+        run: |
+          if ('${{ github.ref_type }}' -eq 'tag' -and '${{ github.ref_name }}' -match '^v(.+)$') {
+            $v = $Matches[1]
+          } else {
+            $v = '0.0.0'
+          }
+          "version=$v" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          Write-Host "Release version: $v"
+
+      - name: Publish portable binaries (all platforms)
+        shell: pwsh
+        run: |
+          $rids = 'win-x64','win-arm64','osx-x64','osx-arm64','linux-x64','linux-arm64'
+          New-Item -ItemType Directory -Force dist | Out-Null
+          foreach ($rid in $rids) {
+            Write-Host "::group::publish $rid"
+            $out = "publish/$rid"
+            dotnet publish src/ScadBundler/ScadBundler.csproj -c Release -r $rid `
+              -p:PortablePublish=true --self-contained true -o $out
+            if ($LASTEXITCODE -ne 0) { throw "publish $rid failed" }
+            $stage = "stage/scadbundler-$rid"
+            New-Item -ItemType Directory -Force $stage | Out-Null
+            Copy-Item LICENSE $stage
+            Copy-Item docs/Install.md (Join-Path $stage 'INSTALL.md')
+            if ($rid -like 'win-*') {
+              Copy-Item "$out/scadbundler.exe" $stage
+              Copy-Item "$out/scadbundler.exe" "dist/scadbundler-$rid.exe"   # bare exe for winget
+            } else {
+              Copy-Item "$out/scadbundler" $stage
+            }
+            Compress-Archive -Path $stage -DestinationPath "dist/scadbundler-$rid.zip" -Force
+            Write-Host "::endgroup::"
+          }
+
+      - name: Pack dotnet tool
+        shell: pwsh
+        run: dotnet pack src/ScadBundler/ScadBundler.csproj -c Release -o dist
+
+      - name: Build MSIX (unsigned, preview)
+        id: msix
+        continue-on-error: true       # best-effort: an MSIX hiccup must not block the rest of the release
+        shell: pwsh
+        run: >
+          ./packaging/msix/build-msix.ps1
+          -AppDir publish/win-x64
+          -Version '${{ steps.ver.outputs.version }}'
+          -OutFile dist/ScadBundler-win-x64.msix
+          -Architecture x64
+
+      - name: Checksums
+        shell: pwsh
+        run: |
+          Get-ChildItem dist -File | Where-Object { $_.Name -ne 'SHA256SUMS.txt' } |
+            Get-FileHash -Algorithm SHA256 |
+            ForEach-Object { '{0}  {1}' -f $_.Hash.ToLower(), (Split-Path $_.Path -Leaf) } |
+            Out-File -Encoding ascii dist/SHA256SUMS.txt
+          Get-Content dist/SHA256SUMS.txt
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-${{ steps.ver.outputs.version }}
+          path: dist/*
+          if-no-files-found: error
+
+      # --- Publish steps run only on a version tag; a manual dispatch is a dry run. ---
+      - name: Create GitHub Release
+        if: ${{ github.ref_type == 'tag' }}
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.zip
+            dist/*.exe
+            dist/*.msix
+            dist/*.nupkg
+            dist/SHA256SUMS.txt
+          generate_release_notes: true
+          prerelease: ${{ contains(github.ref_name, '-') }}
+
+      - name: Push to NuGet.org
+        if: ${{ github.ref_type == 'tag' && env.NUGET_API_KEY != '' }}
+        shell: pwsh
+        run: dotnet nuget push dist/*.nupkg --api-key "$env:NUGET_API_KEY" --source https://api.nuget.org/v3/index.json --skip-duplicate
+
+      # Gated on WINGET_TOKEN; verify the action ref/runner when you enable it (see docs/Releasing.md).
+      - name: Submit to winget
+        if: ${{ github.ref_type == 'tag' && env.WINGET_TOKEN != '' && !contains(github.ref_name, '-') }}
+        uses: vedantmgoyal2009/winget-releaser@v2
+        with:
+          identifier: ScadBundler
+          version: ${{ steps.ver.outputs.version }}
+          installers-regex: 'scadbundler-win-(x64|arm64)\.exe$'
+          release-tag: ${{ github.ref_name }}
+          token: ${{ secrets.WINGET_TOKEN }}
