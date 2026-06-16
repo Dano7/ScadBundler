@@ -5,17 +5,43 @@
     <RootNamespace>ScadBundler.Cli</RootNamespace>
     <AssemblyName>scadbundler</AssemblyName>
 
+    <!-- The bundler is culture-invariant by design; this also drops ICU from portable builds. -->
+    <InvariantGlobalization>true</InvariantGlobalization>
+
     <!-- NuGet global-tool packaging: installs as the `scadbundler` command. -->
     <PackAsTool>true</PackAsTool>
     <ToolCommandName>scadbundler</ToolCommandName>
     <PackageId>ScadBundler</PackageId>
-    <Version>0.1.0</Version>
-    <Authors>ScadBundler</Authors>
-    <Description>AST-based OpenSCAD file bundler: combines a multi-file project into one .scad file.</Description>
+    <Authors>Dan Olsen</Authors>
+    <Description>AST-based OpenSCAD file bundler: combines a multi-file OpenSCAD project into a single .scad file for upload to Thingiverse, MakerWorld, Printables, and other single-file platforms.</Description>
+    <PackageTags>openscad;scad;bundler;inliner;3d-printing;thingiverse;makerworld;cli;dotnet-tool</PackageTags>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageReadmeFile>PACKAGE.md</PackageReadmeFile>
+    <PackageProjectUrl>https://github.com/Dano7/ScadCombiner</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/Dano7/ScadCombiner</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+
+    <!-- Version is derived from the git tag (vX.Y.Z) by MinVer; no hardcoded version to forget. -->
+    <MinVerTagPrefix>v</MinVerTagPrefix>
 
     <!-- The CLI is an application, not a documented library surface. -->
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <!-- Portable, self-contained, single-file publish (no .NET install needed on the target machine).
+       Activated by the release workflow via `-p:PortablePublish=true -r <rid>`. Kept inert for normal
+       build/test/pack so everyday development and the dotnet-tool package are unaffected. Native AOT
+       (smaller/faster) is a future upgrade: it needs per-OS native toolchains validated in CI. -->
+  <PropertyGroup Condition="'$(PortablePublish)' == 'true'">
+    <SelfContained>true</SelfContained>
+    <PublishSingleFile>true</PublishSingleFile>
+    <PublishTrimmed>true</PublishTrimmed>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <DebugType>none</DebugType>
+    <DebugSymbols>false</DebugSymbols>
+    <!-- PackAsTool and single-file publish are mutually exclusive. -->
+    <PackAsTool>false</PackAsTool>
   </PropertyGroup>
 
   <ItemGroup>
@@ -24,6 +50,15 @@
 
   <ItemGroup>
     <ProjectReference Include="..\ScadBundler.Core\ScadBundler.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Git-tag versioning. Build-time only (PrivateAssets=all): not a runtime or package dependency. -->
+    <PackageReference Include="MinVer" Version="5.0.0" PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="PACKAGE.md" Pack="true" PackagePath="\" />
   </ItemGroup>
 
 </Project>
