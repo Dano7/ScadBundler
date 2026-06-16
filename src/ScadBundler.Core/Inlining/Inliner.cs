@@ -811,13 +811,16 @@ public static class Inliner
             }
 
             // The Customizer parameter prologue leads, verbatim (never renamed, so its names stay
-            // user-facing). It is exempt from collision/dedup dropping — it is always emitted here.
+            // user-facing). It is exempt from collision/dedup dropping — it is always emitted here. The
+            // comments OpenSCAD's Customizer reads off each knob (group header, description, annotation)
+            // are marked sticky so they survive a comment-stripping emit (--minify/--no-preserve-comments/
+            // --obfuscate) and the bundled model's Customizer still groups and labels its parameters.
             var statements = new List<Statement>();
             foreach (AssignmentStatement parameter in prologue)
             {
                 if (emitted.Add(parameter))
                 {
-                    statements.Add(Finish(rewriter.RewriteStatement(parameter), banner: false));
+                    statements.Add(StickyCustomizerComments(Finish(rewriter.RewriteStatement(parameter), banner: false)));
                 }
             }
 
@@ -886,6 +889,50 @@ public static class Inliner
         // expression), or the node itself.
         private Statement Substituted(Statement statement) =>
             _replacements.TryGetValue(statement, out Statement? replacement) ? replacement : statement;
+
+        // Marks the comments OpenSCAD's Customizer reads off a hoisted parameter as sticky, so they
+        // survive a comment-stripping emit (--minify / --no-preserve-comments / --obfuscate) and the
+        // bundled model keeps the same Customizer grouping and labels as the original. Exactly the
+        // comments CommentParser.cc consumes: the single-line `/* [group] */` header(s), the description
+        // (the line directly above the assignment), and the trailing `// [..]` annotation. The long file
+        // headers are deliberately not here — attribution has already hoisted them into the aggregated
+        // license block (sticky only when kept), and any leading line that is not the one directly above
+        // is not part of what the Customizer reads, so both still drop under hardening.
+        private static Statement StickyCustomizerComments(Statement parameter)
+        {
+            IReadOnlyList<Trivia> leading = parameter.LeadingTrivia;
+            IReadOnlyList<Trivia> trailing = parameter.TrailingTrivia;
+            if (leading.Count == 0 && trailing.Count == 0)
+            {
+                return parameter;
+            }
+
+            var newLeading = new List<Trivia>(leading.Count);
+            for (int i = 0; i < leading.Count; i++)
+            {
+                newLeading.Add(leading[i] is CommentTrivia comment && IsCustomizerLeadingComment(comment, isLast: i == leading.Count - 1)
+                    ? comment with { Sticky = true }
+                    : leading[i]);
+            }
+
+            var newTrailing = new List<Trivia>(trailing.Count);
+            foreach (Trivia trivia in trailing)
+            {
+                // The inline annotation rides the terminating `;`; OpenSCAD only reads a `//` form there.
+                newTrailing.Add(trivia is CommentTrivia { Kind: CommentKind.Line } comment
+                    ? comment with { Sticky = true }
+                    : trivia);
+            }
+
+            return parameter with { LeadingTrivia = newLeading, TrailingTrivia = newTrailing };
+        }
+
+        // A leading comment the Customizer reads: a single-line `/* [group] */` header (collectGroups
+        // ignores multi-line blocks), or the description — the line directly above the assignment, which
+        // is its last leading comment and must be a `//` line for getDescription to accept it.
+        private static bool IsCustomizerLeadingComment(CommentTrivia comment, bool isLast) =>
+            (comment.Kind == CommentKind.Block && !comment.Text.Contains('\n', StringComparison.Ordinal))
+            || (isLast && comment.Kind == CommentKind.Line);
 
         // Prepends a synthesized `/* [Hidden] */` Customizer boundary to a statement's leading trivia.
         // Modeled as trivia (not a node) so it round-trips the emitter self-check (a comment re-parses

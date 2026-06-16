@@ -469,6 +469,33 @@ public sealed class Slice5BundleTests
     }
 
     [Fact]
+    public void RootParameters_MarkCustomizerCommentsSticky_SoTheySurviveHardening()
+    {
+        // The comments OpenSCAD's Customizer reads off each hoisted parameter — its /* [group] */ header,
+        // the description line directly above, and the trailing // [..] annotation — are marked sticky so
+        // they survive a comment-stripping emit (--minify/--obfuscate/--no-preserve-comments) and the
+        // bundle keeps the same grouping and labels. An ordinary header line above the parameter is not,
+        // so the long file headers still drop. (Licenses off here so the header stays on the parameter.)
+        var (bundled, _) = BundleHelper.Bundle(
+            BundleOptions.Default with { BundleLicenses = false },
+            ("main.scad",
+                "// long library header line\n"
+                + "/* [Sizes] */\n"
+                + "// Outer width of the box\n"
+                + "width = 10; // [1:100]\n"
+                + "cube(width);"));
+
+        var width = bundled.Statements.OfType<AssignmentStatement>().Single(a => a.Name == "width");
+        static bool Sticky(IEnumerable<Trivia> trivia, string text) =>
+            trivia.OfType<CommentTrivia>().Single(t => t.Text == text).Sticky;
+
+        Assert.True(Sticky(width.LeadingTrivia, "/* [Sizes] */"));               // group header
+        Assert.True(Sticky(width.LeadingTrivia, "// Outer width of the box"));    // description (line above)
+        Assert.True(Sticky(width.TrailingTrivia, "// [1:100]"));                  // inline annotation
+        Assert.False(Sticky(width.LeadingTrivia, "// long library header line")); // ordinary header — drops
+    }
+
+    [Fact]
     public void ComputedRootAssignment_IsNotHoisted_StaysAfterItsInputs()
     {
         // Regression (ForkedHolder): `spacing = lib_unit;` is not a Customizer parameter — OpenSCAD
