@@ -15,7 +15,8 @@ That triggers [`.github/workflows/release.yml`](../.github/workflows/release.yml
 
 1. **Portable binaries** — publishes self-contained, single-file, trimmed executables for
    `win-x64`, `win-arm64`, `osx-x64`, `osx-arm64`, `linux-x64`, `linux-arm64` (cross-compiled from a
-   single Linux runner), zips each with `LICENSE`, and writes `SHA256SUMS.txt`.
+   single Windows runner — which also builds the MSIX, since `makeappx` is Windows-only), zips each
+   with `LICENSE`, and writes `SHA256SUMS.txt`.
 2. **NuGet `dotnet tool`** — packs and (if `NUGET_API_KEY` is set) pushes to NuGet.org.
 3. **GitHub Release** — creates the release for the tag and attaches the zips, the bare Windows
    `.exe`s, the checksums, and the `.nupkg`.
@@ -23,9 +24,10 @@ That triggers [`.github/workflows/release.yml`](../.github/workflows/release.yml
 5. **MSIX** — builds an (unsigned) MSIX and attaches it. *Preview; see below.*
 
 ### Dry run first
-Use **Actions → Release → Run workflow** with `dry_run = true` to build all artifacts **without**
-creating a release or publishing anything. Do this before the first real tag to shake out the
-matrix and the MSIX step.
+Run **Actions → Release → Run workflow** from a branch. It builds and uploads every artifact (as a
+workflow artifact) but creates **no** GitHub Release and publishes nothing — the publish steps are
+gated on a version tag (`github.ref_type == 'tag'`). Do this before the first real tag to shake out
+the matrix and the MSIX step.
 
 ## One-time setup
 

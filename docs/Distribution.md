@@ -70,8 +70,9 @@ release automation is in `release.yml`, separate from CI and the web deploy.
   (version from the git tag — the hardcoded `0.1.0` is gone); `global.json` (SDK pin); `LICENSE`;
   `CHANGELOG.md`.
 - **`release.yml`** (tag `vX.Y.Z` or a `workflow_dispatch` dry run): publishes portable,
-  self-contained, single-file, trimmed binaries for all six RIDs from one Linux runner, zips +
-  checksums them, packs the `dotnet tool`, creates the **GitHub Release**, pushes to **NuGet**
+  self-contained, single-file, trimmed binaries for all six RIDs from a single Windows runner (which
+  also builds the MSIX — `makeappx` is Windows-only), zips + checksums them, packs the `dotnet tool`,
+  creates the **GitHub Release**, pushes to **NuGet**
   (gated on `NUGET_API_KEY`), and submits the **winget** manifest (gated on `WINGET_TOKEN`).
 - **Docs:** [Install.md](Install.md) (per-platform, SmartScreen + sponsorship), [Releasing.md](Releasing.md);
   `.github/FUNDING.yml`.
@@ -114,8 +115,9 @@ One **GitHub Release per tag** is the hub; every channel is fed from it.
 Target: artifacts that need **no .NET install**.
 
 - **Shipping default — self-contained, single-file, trimmed.** Verified: an 11 MB
-  `scadbundler.exe` that runs a real multi-file bundle correctly. It **cross-compiles** — one Linux
-  runner emits all six platforms — which is far lower maintenance than a per-OS toolchain matrix.
+  `scadbundler.exe` that runs a real multi-file bundle correctly. It **cross-compiles** — a single
+  Windows runner emits all six platforms (and builds the MSIX) — far lower maintenance than a per-OS
+  toolchain matrix.
   `InvariantGlobalization` drops ICU; trimming is safe here because the engine uses no reflection.
 - **Future upgrade — Native AOT.** Smaller/faster, and the engine is AOT-clean, but it needs per-OS
   native toolchains (MSVC/clang/Xcode) validated on each runner (it does **not** cross-compile). It's

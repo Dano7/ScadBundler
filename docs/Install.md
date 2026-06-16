@@ -16,11 +16,15 @@ per-user OpenSCAD library folder — so `include`/`use` resolve with no extra fl
 
 ## Windows
 
-### winget (recommended)
+### winget
 ```powershell
 winget install ScadBundler
 ```
 Then run `scadbundler bundle myproject.scad -o bundled.scad` in any terminal.
+
+> **If winget can't find it yet:** the package goes live only after the maintainer enables winget
+> publishing (a one-time setup) and the first manifest is accepted into the winget community repo.
+> Until then, use the **portable download** below — it always works.
 
 ### Portable (no install)
 1. Download `scadbundler-win-x64.zip` (or `-win-arm64`) from the
@@ -56,12 +60,16 @@ SmartScreen prompt. (This ships once the project has a Partner Center account.)
 
 1. Download `scadbundler-osx-arm64.zip` (Apple Silicon) or `scadbundler-osx-x64.zip` (Intel) from the
    [latest release](https://github.com/Dano7/ScadCombiner/releases/latest).
-2. Unzip, then move `scadbundler` somewhere on your `PATH` (e.g. `/usr/local/bin`).
-3. Because the binary isn't notarized yet, Gatekeeper may block the first run. Right-click the
-   binary → **Open**, or clear the quarantine flag:
+2. Unzip it, then make it executable and put it on your `PATH`. The zip is built on a Windows
+   runner, so the Unix executable bit needs setting:
    ```bash
-   xattr -d com.apple.quarantine ./scadbundler
    chmod +x ./scadbundler
+   sudo mv ./scadbundler /usr/local/bin/
+   ```
+3. Because the binary isn't notarized yet, Gatekeeper may block the first run. Either right-click it
+   in Finder → **Open**, or clear the quarantine flag:
+   ```bash
+   xattr -d com.apple.quarantine /usr/local/bin/scadbundler
    ```
 
 A Homebrew tap (`brew install dano7/tap/scadbundler`) is planned for one-command installs/updates.

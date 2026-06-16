@@ -12,7 +12,7 @@ A robust, AST-based OpenSCAD file bundler/inliner for single-file platforms like
 
 **Fast local tool** (recommended for large libraries — runs natively and reads your `OPENSCADPATH`):
 
-- **Windows:** `winget install ScadBundler`, or grab a portable build from the [latest release](https://github.com/Dano7/ScadCombiner/releases/latest) — no .NET needed.
+- **Windows:** grab a portable build from the [latest release](https://github.com/Dano7/ScadCombiner/releases/latest) (no .NET needed), or `winget install ScadBundler` once the winget package is published.
 - **macOS / Linux:** download the portable build for your platform from the [latest release](https://github.com/Dano7/ScadCombiner/releases/latest).
 - **Already have .NET?** `dotnet tool install --global ScadBundler`
 
