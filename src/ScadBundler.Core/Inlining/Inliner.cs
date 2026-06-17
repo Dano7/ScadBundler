@@ -893,11 +893,11 @@ public static class Inliner
         // Marks the comments OpenSCAD's Customizer reads off a hoisted parameter as sticky, so they
         // survive a comment-stripping emit (--minify / --no-preserve-comments / --obfuscate) and the
         // bundled model keeps the same Customizer grouping and labels as the original. Exactly the
-        // comments CommentParser.cc consumes: the single-line `/* [group] */` header(s), the description
-        // (the line directly above the assignment), and the trailing `// [..]` annotation. The long file
-        // headers are deliberately not here — attribution has already hoisted them into the aggregated
-        // license block (sticky only when kept), and any leading line that is not the one directly above
-        // is not part of what the Customizer reads, so both still drop under hardening.
+        // comments CommentParser.cc consumes: the `/* [group] */` header(s), the description (the `//`
+        // line directly above the assignment), and the trailing `// [..]` annotation. Nothing else — the
+        // long file headers are hoisted out by attribution (sticky only when kept), and an ordinary
+        // leading line, a non-adjacent line, or a prose trailing comment is not read by the Customizer,
+        // so all of those still drop under hardening.
         private static Statement StickyCustomizerComments(Statement parameter)
         {
             IReadOnlyList<Trivia> leading = parameter.LeadingTrivia;
@@ -908,18 +908,17 @@ public static class Inliner
             }
 
             var newLeading = new List<Trivia>(leading.Count);
-            for (int i = 0; i < leading.Count; i++)
+            foreach (Trivia trivia in leading)
             {
-                newLeading.Add(leading[i] is CommentTrivia comment && IsCustomizerLeadingComment(comment, isLast: i == leading.Count - 1)
+                newLeading.Add(trivia is CommentTrivia comment && IsCustomizerLeadingComment(comment, parameter)
                     ? comment with { Sticky = true }
-                    : leading[i]);
+                    : trivia);
             }
 
             var newTrailing = new List<Trivia>(trailing.Count);
             foreach (Trivia trivia in trailing)
             {
-                // The inline annotation rides the terminating `;`; OpenSCAD only reads a `//` form there.
-                newTrailing.Add(trivia is CommentTrivia { Kind: CommentKind.Line } comment
+                newTrailing.Add(trivia is CommentTrivia comment && IsCustomizerAnnotation(comment)
                     ? comment with { Sticky = true }
                     : trivia);
             }
@@ -927,12 +926,31 @@ public static class Inliner
             return parameter with { LeadingTrivia = newLeading, TrailingTrivia = newTrailing };
         }
 
-        // A leading comment the Customizer reads: a single-line `/* [group] */` header (collectGroups
-        // ignores multi-line blocks), or the description — the line directly above the assignment, which
-        // is its last leading comment and must be a `//` line for getDescription to accept it.
-        private static bool IsCustomizerLeadingComment(CommentTrivia comment, bool isLast) =>
-            (comment.Kind == CommentKind.Block && !comment.Text.Contains('\n', StringComparison.Ordinal))
-            || (isLast && comment.Kind == CommentKind.Line);
+        // A leading comment the Customizer reads: a `/* [group] */` marker (same test as the attribution
+        // pass — collectGroups), or the description, which getDescription reads from exactly `firstLine-1`
+        // — so it must be a `//` line on the source line immediately above the assignment (a blank line in
+        // between disqualifies it). The parameter keeps its original span through bundling, so the line
+        // numbers are the author's.
+        private static bool IsCustomizerLeadingComment(CommentTrivia comment, Statement parameter) =>
+            Attribution.IsCustomizerGroupMarker(comment)
+            || (comment.Kind == CommentKind.Line
+                && comment.Span.End.Line + 1 == parameter.Span.Start.Line);
+
+        // The trailing comment OpenSCAD reads as a parameter annotation (getComment), restricted to the
+        // forms that actually constrain the Customizer widget: a bracketed `[min:max]`/`[a,b,…]`/range, or
+        // a bare number (step/max). A word/string trailing comment also parses but has no widget effect
+        // (ParameterObject.cc), so it is dropped like prose rather than carried into a hardened bundle.
+        private static bool IsCustomizerAnnotation(CommentTrivia comment)
+        {
+            if (comment.Kind != CommentKind.Line)
+            {
+                return false;
+            }
+
+            string body = comment.Text.AsSpan(2).Trim().ToString(); // the text after the `//`
+            return body.StartsWith('[')
+                || double.TryParse(body, NumberStyles.Float, CultureInfo.InvariantCulture, out _);
+        }
 
         // Prepends a synthesized `/* [Hidden] */` Customizer boundary to a statement's leading trivia.
         // Modeled as trivia (not a node) so it round-trips the emitter self-check (a comment re-parses
