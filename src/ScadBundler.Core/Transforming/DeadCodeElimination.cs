@@ -92,11 +92,26 @@ internal sealed class DeadCodeElimination : IBundleTransform
 
         var kept = new List<Statement>(bundle.Statements.Count);
         int removed = 0;
+
+        // Sticky leading trivia rescued from dropped statements (the aggregated license header and the
+        // synthesized /* [Hidden] */ fence, both Sticky). Dropping their host statement must not drop
+        // them — carry them forward onto the next surviving statement so the license and the Customizer
+        // fence still lead the body (the --parameters-first relocation rides on a body statement, which
+        // is exactly the kind of node tree-shaking can remove).
+        var rescued = new List<Trivia>();
         foreach (Statement statement in bundle.Statements)
         {
             if (removable.Contains(statement) && !live.Contains(statement))
             {
                 removed++;
+                rescued.AddRange(statement.LeadingTrivia.Where(static t => t is CommentTrivia { Sticky: true }));
+                continue;
+            }
+
+            if (rescued.Count > 0)
+            {
+                kept.Add(statement with { LeadingTrivia = [.. rescued, .. statement.LeadingTrivia] });
+                rescued.Clear();
                 continue;
             }
 
