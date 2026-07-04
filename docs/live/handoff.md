@@ -200,7 +200,7 @@ flow, but two touched Core (diagnostics/transforms) and one touched the web clas
 deployment**, set **Source = "GitHub Actions"**. That's the only switch — no branch, no extra account. The
 workflow ([../../.github/workflows/deploy-pages.yml](../../.github/workflows/deploy-pages.yml)) then deploys
 on every push to `main` (and via the **Run workflow** button / `workflow_dispatch`). Live URL:
-**<https://dano7.github.io/ScadCombiner/>** (the workflow derives the `/<repo>/` base-href dynamically).
+**<https://dano7.github.io/ScadBundler/>** (the workflow derives the `/<repo>/` base-href dynamically).
 
 > Before adding **any** dependency to `ScadBundler.Core`, stop and ask (Core stays dependency-free). The
 > §C1 work is **web-only** — keep it that way.
@@ -261,7 +261,7 @@ green** (Core 692, CLI 23, Integration 34, **Web 45** [+10]).
   knob combinations, all byte-identical to the disk/CLI mapping).
 - **Release publish verified locally:** trimmed + invariant-globalization, Brotli **and** gzip emitted
   (41 each), ~2.3 MB compressed runtime; published `index.html` carries `<base href="/" />` (so the sed
-  matches). The workflow's post-publish steps were **simulated locally** (sed → `/ScadCombiner/`, 404
+  matches). The workflow's post-publish steps were **simulated locally** (sed → `/ScadBundler/`, 404
   copy, `.nojekyll`, `_framework/` intact, zero stray `href="/"`).
 - **App boots:** `dotnet run … --urls http://localhost:5219` serves `/`, `_framework/blazor.webassembly.js`,
   `interop.js`, `css/app.css` (all 200); `#app` shell + the new `.options-body` CSS present.
