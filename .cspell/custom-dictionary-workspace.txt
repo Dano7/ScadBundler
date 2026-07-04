@@ -3,5 +3,5 @@ concatenator
 Customizer
 Thingiverse
 ANTLR
-ScadCombiner
+ScadBundler
 OpenSCAD

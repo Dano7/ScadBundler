@@ -8,7 +8,7 @@ A robust, AST-based OpenSCAD file bundler/inliner for single-file platforms like
 
 ## Quick Start
 
-**No install — use the web version** in your browser: **<https://dano7.github.io/ScadBundler/>** (best for smaller projects).
+**No install — use the web version** in your browser: **<https://dano7.github.io/ScadBundler/>** (best for smaller projects; it runs entirely via WebAssembly, so large/library-heavy projects — think BOSL2-scale, a dozen+ files or several megabytes of source — will be noticeably slower there than on the CLI below, though it will still get the job done).
 
 **Fast local tool** (recommended for large libraries — runs natively and reads your `OPENSCADPATH`):
 

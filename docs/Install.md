@@ -28,7 +28,7 @@ Then run `scadbundler bundle myproject.scad -o bundled.scad` in any terminal.
 
 ### Portable (no install)
 1. Download `scadbundler-win-x64.zip` (or `-win-arm64`) from the
-   [latest release](https://github.com/Dano7/ScadCombiner/releases/latest).
+   [latest release](https://github.com/Dano7/ScadBundler/releases/latest).
 2. Unzip it anywhere. Either run `scadbundler.exe` directly, or add its folder to your `PATH` to
    call `scadbundler` from any terminal.
 
@@ -59,7 +59,7 @@ SmartScreen prompt. (This ships once the project has a Partner Center account.)
 ## macOS
 
 1. Download `scadbundler-osx-arm64.zip` (Apple Silicon) or `scadbundler-osx-x64.zip` (Intel) from the
-   [latest release](https://github.com/Dano7/ScadCombiner/releases/latest).
+   [latest release](https://github.com/Dano7/ScadBundler/releases/latest).
 2. Unzip it, then make it executable and put it on your `PATH`. The zip is built on a Windows
    runner, so the Unix executable bit needs setting:
    ```bash
@@ -79,7 +79,7 @@ A Homebrew tap (`brew install dano7/tap/scadbundler`) is planned for one-command
 ## Linux
 
 1. Download `scadbundler-linux-x64.zip` (or `-linux-arm64`) from the
-   [latest release](https://github.com/Dano7/ScadCombiner/releases/latest).
+   [latest release](https://github.com/Dano7/ScadBundler/releases/latest).
 2. Unzip, mark executable, and put it on your `PATH`:
    ```bash
    unzip scadbundler-linux-x64.zip && cd scadbundler-linux-x64

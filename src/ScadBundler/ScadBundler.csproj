@@ -17,8 +17,8 @@
     <PackageTags>openscad;scad;bundler;inliner;3d-printing;thingiverse;makerworld;cli;dotnet-tool</PackageTags>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageReadmeFile>PACKAGE.md</PackageReadmeFile>
-    <PackageProjectUrl>https://github.com/Dano7/ScadCombiner</PackageProjectUrl>
-    <RepositoryUrl>https://github.com/Dano7/ScadCombiner</RepositoryUrl>
+    <PackageProjectUrl>https://github.com/Dano7/ScadBundler</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/Dano7/ScadBundler</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
 
     <!-- Version is derived from the git tag (vX.Y.Z) by MinVer; no hardcoded version to forget. -->

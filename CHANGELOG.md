@@ -7,6 +7,13 @@ All notable changes to ScadBundler are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+- **ScadBundler Live** intro sets clearer expectations that WASM performance on large,
+  library-heavy projects is much slower than the native CLI, and points users there when they
+  hit that wall.
+- Fixed lingering references to the project's former name (`ScadCombiner`) throughout docs,
+  package metadata, and the web app — all now point at `ScadBundler`.
+
 ### Added
 - **Distribution pipeline.** Tag-driven `release.yml` produces portable, self-contained
   single-file executables for win-x64/arm64, osx-x64/arm64, and linux-x64/arm64 (no .NET install
@@ -17,4 +24,4 @@ All notable changes to ScadBundler are documented here. The format follows
 - [docs/Install.md](docs/Install.md) — per-platform install guide, the Windows SmartScreen
   "Run anyway" explanation, and a code-signing sponsorship appeal.
 
-[Unreleased]: https://github.com/Dano7/ScadCombiner/commits/main
+[Unreleased]: https://github.com/Dano7/ScadBundler/commits/main

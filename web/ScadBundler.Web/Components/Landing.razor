@@ -9,4 +9,14 @@
         self-contained file. Drop your files below — everything runs in your browser, nothing is uploaded
         anywhere, and the result is byte-for-byte what the command-line bundler produces.
     </p>
+    <p class="blurb">
+        This page runs entirely in your browser via WebAssembly, which is great for small-to-medium
+        projects but is inherently much slower than a native program — a large library-heavy project
+        (think BOSL2-scale, a dozen+ files or several megabytes of source) that bundles in a couple of
+        seconds on the CLI can take minutes here and feel a little frozen at times. It'll still get there,
+        but if you have the technical means to run the
+        <a href="https://github.com/Dano7/ScadBundler#readme" target="_blank" rel="noopener noreferrer">
+            command-line tool
+        </a>, it'll be a much faster and smoother experience for bigger projects.
+    </p>
 </header>
