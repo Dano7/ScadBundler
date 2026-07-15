@@ -51,9 +51,12 @@ public static class WebBundler
 
         // Emit: minify collapses whitespace + drops non-sticky comments; obfuscate keeps formatting but
         // drops ordinary comments (the aggregated license + Customizer fence are sticky and survive both).
+        // MaxLineLength defaults exactly as the CLI's: 256 under a hardening profile, off otherwise (ADR 0003).
         var emitOptions = new EmitOptions(
             Minify: hardening == HardeningProfile.Minify,
-            PreserveComments: hardening == HardeningProfile.None && options.PreserveComments);
+            PreserveComments: hardening == HardeningProfile.None && options.PreserveComments,
+            MaxLineLength: options.MaxLineLength
+                ?? (hardening == HardeningProfile.None ? 0 : EmitOptions.DefaultHardenedMaxLineLength));
 
         BundleResult result = Bundler.Bundle(root, bundleOptions, fs);
         bool hasError = result.Diagnostics.Any(d => d.Severity == DiagnosticSeverity.Error);

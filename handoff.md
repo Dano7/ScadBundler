@@ -449,7 +449,7 @@ truth verified at `C:\git\hub\openscad`.
 ## What Slice 6 added
 
 - **`Emitting/Emitter.cs`** — a deterministic, idempotent recursive pretty-printer. Numbers/strings via `RawText`; author `ParenthesizedExpression` preserved; **precedence-minimal parens** inserted only around synthesized subtrees (thresholds aligned to `docs/Parser-Planning.md`); leading comments on their own indented lines, trailing comments after two spaces, `BlankLineBefore` → one blank line; `--minify` (drops comments/blank lines/optional whitespace, keeps token-separating spaces via a word-char guard). `Emitter.RoundTripsStructurally` is the internal SB6001 self-check (re-parse + `StructuralKey` compare) used by tests.
-- **`Emitting/EmitOptions.cs`** — `IndentWidth`/`IndentStyle`/`BraceStyle`/`MaxLineLength` (advisory)/`Minify`/`PreserveComments`. Defaults lock the goldens.
+- **`Emitting/EmitOptions.cs`** — `IndentWidth`/`IndentStyle`/`BraceStyle`/`MaxLineLength` (hard token-boundary wrapping since ADR 0003; `0` = off, the default — the CLI defaults hardened output to 256)/`Minify`/`PreserveComments`. Defaults lock the goldens.
 - **`src/ScadBundler` CLI** — `scadbundler bundle <in> [opts]` with every `docs/UX.md` option (`-o`/`-p`/`--on-collision`/`--bundle-licenses`/`--[no-]preserve-comments`/`--minify`/`--dry-run`/`--diff`/`--verbose`); diagnostics grouped by severity to stderr; exit `0`/`1` (any Error diagnostic)/`2` (bad args).
 - **Goldens:** `tests/Corpus/slice5-bundle/*/expected.scad` (B-001..B-007, now exact) and `tests/Corpus/slice6-emit/*` (EM-001 Customizer trivia, precedence, control-flow, comprehensions). Regenerate with `BLESS_EMIT=1`.
 - **`SB6001`** added to `DiagnosticCode.cs` (the emitter self-check code; reserved/internal).
@@ -501,8 +501,9 @@ truth verified at `C:\git\hub\openscad`.
   `tests/ScadBundler.IntegrationTests` (`DifferentialAssert` + `OpenScadCli`/`OpenScadStderr`); the
   official fixtures and Dan's real projects run differentially on every `dotnet test` when OpenSCAD is
   present. See "Done this session (2026-06-10, session 3)".
-- Line-length wrapping in the emitter (`MaxLineLength` is advisory today). (`--bundle-licenses`
-  aggregation is **done** — this session.)
+- ~~Line-length wrapping in the emitter (`MaxLineLength` is advisory today)~~ — **done (2026-07-15):**
+  `--max-line-length` hard-wraps at safe token boundaries, default 256 under `--minify`/`--obfuscate`
+  (`0` = off; ADR 0003). (`--bundle-licenses` aggregation is **done** — this session.)
 
 ## Commands
 

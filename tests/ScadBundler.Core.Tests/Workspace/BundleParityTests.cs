@@ -105,6 +105,9 @@ public sealed class BundleParityTests
             new(Hardening: HardeningProfile.Obfuscate, StripLicense: true, OnCollision: CollisionStrategy.KeepLast),
             new(ParametersFirst: true),
             new(Hardening: HardeningProfile.Minify, ParametersFirst: true),
+            new(Hardening: HardeningProfile.Minify, MaxLineLength: 40),
+            new(Hardening: HardeningProfile.Minify, MaxLineLength: 0),
+            new(MaxLineLength: 30),
         ];
 
         foreach (WebBundleOptions options in permutations)
@@ -150,7 +153,9 @@ public sealed class BundleParityTests
                 ParametersFirst: options.ParametersFirst);
             var emitOptions = new EmitOptions(
                 Minify: options.Hardening == HardeningProfile.Minify,
-                PreserveComments: options.Hardening == HardeningProfile.None && options.PreserveComments);
+                PreserveComments: options.Hardening == HardeningProfile.None && options.PreserveComments,
+                MaxLineLength: options.MaxLineLength
+                    ?? (options.Hardening == HardeningProfile.None ? 0 : EmitOptions.DefaultHardenedMaxLineLength));
 
             string root = Path.Combine(dir, rootName.Replace('/', Path.DirectorySeparatorChar));
             BundleResult result = Bundler.Bundle(root, bundleOptions, DiskFileSystem.Instance);

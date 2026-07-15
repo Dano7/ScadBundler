@@ -86,6 +86,16 @@
                     </span>
                 </label>
 
+                <label class="opt-field">
+                    <span class="opt-label">Max line length</span>
+                    <input type="number" min="0" step="1" placeholder="auto"
+                           value="@(Opts.MaxLineLength?.ToString() ?? string.Empty)" @onchange="OnMaxLineLengthChanged" />
+                    <span class="opt-note">Hard-wraps longer emitted lines at a safe token boundary
+                        (geometry unchanged). Leave blank for the default: 256 under Minify/Obfuscate —
+                        some platforms' line-buffered parsers choke on longer lines — and off otherwise.
+                        0 = no limit (maximal minification).</span>
+                </label>
+
                 <label class="opt-row">
                     <input type="checkbox" checked="@Opts.ParametersFirst" @onchange="OnParametersFirstChanged" />
                     <span>
@@ -167,6 +177,13 @@
 
     private void OnParametersFirstChanged(ChangeEventArgs e) =>
         Controller.SetOptions(Opts with { ParametersFirst = AsBool(e) });
+
+    // Blank (or anything unparsable/negative) means "auto" — the CLI's profile-dependent default.
+    private void OnMaxLineLengthChanged(ChangeEventArgs e) =>
+        Controller.SetOptions(Opts with
+        {
+            MaxLineLength = int.TryParse(e.Value?.ToString(), out int n) && n >= 0 ? n : null,
+        });
 
     private static bool AsBool(ChangeEventArgs e) => e.Value is true || e.Value?.ToString() == "true";
 

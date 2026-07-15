@@ -46,7 +46,8 @@ internal static class DifferentialAssert
         }
 
         // 2 — bundle in-process. The env-aware overload sees the same OPENSCADPATH as the binary.
-        BundleResult bundle = Bundler.Bundle(rootPath, options ?? BundleOptions.Default);
+        BundleOptions bundleOptions = options ?? BundleOptions.Default;
+        BundleResult bundle = Bundler.Bundle(rootPath, bundleOptions);
         File.WriteAllLines(
             Path.Combine(workDir, "bundle.diagnostics.txt"),
             bundle.Diagnostics.Select(FormatDiagnostic));
@@ -59,9 +60,17 @@ internal static class DifferentialAssert
             Assert.Fail(Message("bundling produced error diagnostics", errors, workDir));
         }
 
-        // 3 — emit and render the bundle.
+        // 3 — emit and render the bundle, from the exact text the CLI would write: the emit options
+        // mirror BundleCommand's mapping (minified text under Minify, 256-char wrapping under any
+        // hardening profile), so the differential proves the shipped bytes, not a pretty-printed proxy.
+        var emitOptions = new EmitOptions(
+            Minify: bundleOptions.Hardening == HardeningProfile.Minify,
+            PreserveComments: bundleOptions.Hardening == HardeningProfile.None && bundleOptions.PreserveComments,
+            MaxLineLength: bundleOptions.Hardening == HardeningProfile.None
+                ? 0
+                : EmitOptions.DefaultHardenedMaxLineLength);
         string bundledScad = Path.Combine(workDir, "bundled.scad");
-        File.WriteAllText(bundledScad, Emitter.Emit(bundle.Bundled));
+        File.WriteAllText(bundledScad, Emitter.Emit(bundle.Bundled, emitOptions));
         string bundledCsg = Path.Combine(workDir, "bundled.csg");
         OpenScadRender bundled = OpenScadCli.RenderToCsg(bundledScad, bundledCsg, workDir);
         File.WriteAllLines(Path.Combine(workDir, "bundled.stderr.txt"), bundled.StderrLines);

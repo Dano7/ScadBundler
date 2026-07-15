@@ -13,6 +13,11 @@ namespace ScadBundler.Core.Emitting;
 /// whose operator precedence is looser than its position allows so the re-parsed tree is identical
 /// (needed for the synthesized rename/normalize nodes the inliner produces). Output is deterministic for
 /// a given AST + <see cref="EmitOptions"/>, and idempotent: <c>Emit(Parse(Emit(ast))) == Emit(ast)</c>.
+/// When <see cref="EmitOptions.MaxLineLength"/> is positive, lines are hard-wrapped at the last safe
+/// token boundary (ADR 0003) — newlines are inter-token whitespace to OpenSCAD, so the re-parsed tree
+/// (and the CSG) is unchanged; breaks are never placed inside strings, <c>include</c>/<c>use</c> paths,
+/// comments, or a top-level assignment carrying a Customizer annotation (whose first line the
+/// Customizer's line-based extraction reads).
 /// </summary>
 public sealed class Emitter
 {
@@ -29,6 +34,16 @@ public sealed class Emitter
 
     private readonly EmitOptions _options;
     private readonly StringBuilder _builder = new();
+
+    // Line-wrapping state (inert when MaxLineLength is 0): where the current output line begins, the
+    // last position a break may be inserted (-1 = none on this line), the statement indent level that
+    // break would continue under, and a depth counter suppressing breaks inside statements whose first
+    // line the Customizer reads (a top-level assignment with a trailing annotation comment).
+    private int _lineStart;
+    private int _breakOpportunity = -1;
+    private int _breakIndentLevel;
+    private int _statementLevel;
+    private int _suppressBreaks;
 
     private Emitter(EmitOptions options) => _options = options;
 
@@ -76,13 +91,18 @@ public sealed class Emitter
         {
             if (Min)
             {
+                if (level > 0)
+                {
+                    AllowBreak(); // packed statements share a line; the seam between them is a safe break
+                }
+
                 EmitLeadingTrivia(statement, level); // sticky-only under minify: the license header + Customizer fence survive
                 EmitStatementCore(statement, level);
                 if (level == 0)
                 {
                     // One top-level statement per line so OpenSCAD's line-based Customizer extraction
                     // (getLineToStop) still sees the hoisted parameter prologue above the first '{'.
-                    _builder.Append('\n');
+                    AppendLineBreak();
                 }
             }
             else
@@ -112,6 +132,20 @@ public sealed class Emitter
     // else branch), where leading comments and line breaks would be wrong.
     private void EmitStatementCore(Statement statement, int level)
     {
+        int enclosingLevel = _statementLevel;
+        _statementLevel = level; // continuation indent for any wrap inside this statement
+
+        // The Customizer reads a parameter's annotation off the line its assignment STARTS on
+        // (CommentParser.cc getComment(fulltext, firstLine)); a break inside the assignment would strand
+        // the annotation on a later line, so such statements are emitted unbreakable (ADR 0003).
+        bool protectAnnotationLine = level == 0
+            && statement is AssignmentStatement
+            && HasEmittedTrailingComment(statement);
+        if (protectAnnotationLine)
+        {
+            _suppressBreaks++;
+        }
+
         switch (statement)
         {
             case IncludeStatement include:
@@ -172,6 +206,13 @@ public sealed class Emitter
         }
 
         EmitTrailingTrivia(statement);
+
+        if (protectAnnotationLine)
+        {
+            _suppressBreaks--;
+        }
+
+        _statementLevel = enclosingLevel;
     }
 
     private void EmitInstantiation(ModuleInstantiation instantiation, int level)
@@ -258,6 +299,7 @@ public sealed class Emitter
         Write("{");
         if (Min)
         {
+            AllowBreak();
             EmitStatementList(block.Statements, level + 1);
             Write("}");
             return;
@@ -441,6 +483,7 @@ public sealed class Emitter
             {
                 Write(",");
                 Space();
+                AllowBreak();
             }
 
             EmitExpression(vector.Elements[i], 0);
@@ -471,9 +514,11 @@ public sealed class Emitter
         EmitBindings(comprehension.Init);
         Write(";");
         Space();
+        AllowBreak();
         EmitExpression(comprehension.Condition, 0);
         Write(";");
         Space();
+        AllowBreak();
         EmitBindings(comprehension.Update);
         Write(")");
         Space();
@@ -518,6 +563,7 @@ public sealed class Emitter
             {
                 Write(",");
                 Space();
+                AllowBreak();
             }
 
             Write(parameters[i].Name);
@@ -540,6 +586,7 @@ public sealed class Emitter
             {
                 Write(",");
                 Space();
+                AllowBreak();
             }
 
             if (arguments[i].Name is not null)
@@ -569,6 +616,7 @@ public sealed class Emitter
             {
                 Write(",");
                 Space();
+                AllowBreak();
             }
 
             if (bindings[i].Name.Length > 0)
@@ -600,8 +648,8 @@ public sealed class Emitter
                 WriteIndent(level);
             }
 
-            _builder.Append(comment.Text);
-            _builder.Append('\n'); // a real newline even under minify: separates the sticky header/fence and terminates a line comment
+            AppendTrivia(comment.Text);
+            AppendLineBreak(); // a real newline even under minify: separates the sticky header/fence and terminates a line comment
         }
     }
 
@@ -616,8 +664,25 @@ public sealed class Emitter
             }
 
             _builder.Append("  ");
-            _builder.Append(comment.Text);
+            AppendTrivia(comment.Text);
         }
+    }
+
+    // Whether EmitTrailingTrivia will emit at least one same-line comment for this node under the
+    // current options — i.e. whether the node's emitted line ends in a comment the wrapper must not
+    // strand (the Customizer annotation case).
+    private bool HasEmittedTrailingComment(AstNode node)
+    {
+        bool stripping = Min || !_options.PreserveComments;
+        foreach (Trivia trivia in node.TrailingTrivia)
+        {
+            if (trivia is CommentTrivia comment && (!stripping || comment.Sticky))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private void EmitFileTrailingTrivia(ScadFile file)
@@ -631,7 +696,7 @@ public sealed class Emitter
         {
             if (trivia is CommentTrivia comment)
             {
-                _builder.Append(comment.Text);
+                AppendTrivia(comment.Text);
                 NewLine();
             }
         }
@@ -652,20 +717,26 @@ public sealed class Emitter
         }
 
         _builder.Append(text);
+        WrapIfNeeded();
     }
 
-    // A binary/assignment/ternary operator: spaced in pretty mode, bare in minify.
+    // A binary/assignment/ternary operator: spaced in pretty mode, bare in minify. A break is always
+    // safe immediately after an operator (the lexer treats the newline as inter-token whitespace).
     private void WriteOperator(string op)
     {
         if (Min)
         {
             Write(op);
-            return;
+        }
+        else
+        {
+            _builder.Append(' ');
+            _builder.Append(op);
+            _builder.Append(' ');
+            WrapIfNeeded();
         }
 
-        _builder.Append(' ');
-        _builder.Append(op);
-        _builder.Append(' ');
+        AllowBreak();
     }
 
     private void Space()
@@ -680,7 +751,74 @@ public sealed class Emitter
     {
         if (!Min)
         {
-            _builder.Append('\n');
+            AppendLineBreak();
+        }
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Line wrapping (EmitOptions.MaxLineLength, ADR 0003)
+    // ---------------------------------------------------------------------------------------------
+
+    // Marks the current position as a safe place to insert a line break: strictly between tokens —
+    // never inside a string/number raw text, an include/use path, or comment trivia (no AllowBreak
+    // call sites exist there) — and suppressed while emitting a statement whose first line the
+    // Customizer's line-based extraction reads (a top-level assignment with a trailing annotation).
+    private void AllowBreak()
+    {
+        if (_options.MaxLineLength > 0 && _suppressBreaks == 0)
+        {
+            _breakOpportunity = _builder.Length;
+            _breakIndentLevel = _statementLevel;
+        }
+    }
+
+    // Greedy hard wrap: when the current line has grown past MaxLineLength and a safe break point
+    // exists on it, break there — the completed line ends at the last safe point, and only a single
+    // unbreakable run (e.g. one long string literal) can leave a line over the limit. A separator's
+    // trailing space is dropped at the break so wrapped lines never end in whitespace.
+    private void WrapIfNeeded()
+    {
+        if (_options.MaxLineLength <= 0
+            || _builder.Length - _lineStart <= _options.MaxLineLength
+            || _breakOpportunity <= _lineStart)
+        {
+            return;
+        }
+
+        int at = _breakOpportunity;
+        if (_builder[at - 1] == ' ')
+        {
+            _builder.Remove(--at, 1);
+        }
+
+        _builder.Insert(at, Min ? "\n" : "\n" + ContinuationIndent());
+        _lineStart = at + 1; // the wrapped line starts after the '\n'; its continuation indent counts toward its length
+        _breakOpportunity = -1;
+    }
+
+    // Continuation lines sit two levels past the wrapped statement's own indent, distinguishing them
+    // from a nested block's single extra level.
+    private string ContinuationIndent() => _options.IndentStyle == IndentStyle.Tabs
+        ? new string('\t', _breakIndentLevel + 2)
+        : new string(' ', (_breakIndentLevel + 2) * _options.IndentWidth);
+
+    // Every newline the emitter produces funnels through here (or AppendTrivia) so the current line's
+    // start — and with it the wrap accounting — stays exact.
+    private void AppendLineBreak()
+    {
+        _builder.Append('\n');
+        _lineStart = _builder.Length;
+    }
+
+    // Appends comment text verbatim; a multi-line comment moves the line start to its last line.
+    private void AppendTrivia(string text)
+    {
+        int start = _builder.Length;
+        _builder.Append(text);
+        int lastNewline = text.LastIndexOf('\n');
+        if (lastNewline >= 0)
+        {
+            _lineStart = start + lastNewline + 1;
         }
     }
 

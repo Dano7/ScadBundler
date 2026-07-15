@@ -232,10 +232,160 @@ public sealed class EmitterTests
         Assert.Equal(4, options.IndentWidth);
         Assert.Equal(IndentStyle.Spaces, options.IndentStyle);
         Assert.Equal(BraceStyle.SameLine, options.BraceStyle);
-        Assert.Equal(100, options.MaxLineLength);
+        Assert.Equal(0, options.MaxLineLength); // no wrapping by default; the CLI opts hardened output into 256
         Assert.False(options.Minify);
         Assert.True(options.PreserveComments);
         Assert.Equal(options, new EmitOptions()); // record value-equality
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Line wrapping (EmitOptions.MaxLineLength, ADR 0003)
+    // ---------------------------------------------------------------------------------------------
+
+    [Fact]
+    public void Wrap_Minify_KeepsEveryLineWithinTheLimit()
+    {
+        const string source =
+            "module grid(w) { translate([0,1,0]) cube([w,1,1]); translate([0,2,0]) cube([w,1,2]); "
+            + "translate([0,3,0]) cube([w,1,3]); translate([0,4,0]) cube([w,1,4]); }";
+        var options = new EmitOptions(Minify: true, MaxLineLength: 40);
+
+        string emitted = Emitter.Emit(ParseHelper.Parse(source).Root, options);
+
+        AssertLinesWithin(emitted, 40);
+        Assert.True(Emitter.RoundTripsStructurally(ParseHelper.Parse(source).Root, options));
+    }
+
+    [Fact]
+    public void Wrap_Minify_InsertsOnlyNewlines()
+    {
+        // A wrapped emit is the unwrapped emit plus line breaks — nothing else moves — so stripping
+        // every newline from both recovers identical text.
+        ScadFile root = ParseHelper.Parse(RichScad.Source).Root;
+        string unwrapped = Emitter.Emit(root, new EmitOptions(Minify: true));
+        string wrapped = Emitter.Emit(root, new EmitOptions(Minify: true, MaxLineLength: 60));
+
+        Assert.Equal(
+            unwrapped.Replace("\n", string.Empty, StringComparison.Ordinal),
+            wrapped.Replace("\n", string.Empty, StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void Wrap_RoundTripsStructurally_AndIsIdempotent(bool minify)
+    {
+        var options = new EmitOptions(Minify: minify, MaxLineLength: 48);
+        ScadFile root = ParseHelper.Parse(RichScad.Source).Root;
+
+        Assert.True(Emitter.RoundTripsStructurally(root, options));
+
+        string once = Emitter.Emit(root, options);
+        string twice = Emitter.Emit(ParseHelper.Parse(once).Root, options);
+        Assert.Equal(once, twice);
+    }
+
+    [Fact]
+    public void Wrap_NeverBreaksAnAnnotatedParameterLine()
+    {
+        // The Customizer reads a parameter's annotation off the line its assignment STARTS on
+        // (CommentParser.cc getComment), so the whole statement stays on one line even over the limit.
+        var parsed = (AssignmentStatement)ParseHelper.Parse("width = [1111, 2222, 3333, 4444, 5555, 6666];").Root.Statements[0];
+        AssignmentStatement annotated = parsed with
+        {
+            TrailingTrivia =
+            [
+                new CommentTrivia("// [1:100]", CommentKind.Line) { Span = SourceSpan.Synthetic, Sticky = true },
+            ],
+        };
+        var file = new ScadFile(SourceFile.Synthesized, [annotated]);
+
+        string emitted = Emitter.Emit(file, new EmitOptions(Minify: true, MaxLineLength: 30));
+
+        string firstLine = emitted.Split('\n')[0];
+        Assert.Contains("width=[1111,", firstLine, StringComparison.Ordinal);
+        Assert.EndsWith("// [1:100]", firstLine, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Wrap_BreaksAnUnannotatedTopLevelAssignment()
+    {
+        // Without an annotation there is nothing line-based for the Customizer to lose (description
+        // and group comments are read relative to the assignment's FIRST line, which wrapping keeps).
+        string emitted = Emitter.Emit(
+            ParseHelper.Parse("width = [1111, 2222, 3333, 4444, 5555, 6666];").Root,
+            new EmitOptions(Minify: true, MaxLineLength: 30));
+
+        AssertLinesWithin(emitted, 30);
+        Assert.Contains('\n', emitted.TrimEnd('\n'));
+    }
+
+    [Fact]
+    public void Wrap_NeverSplitsAStringLiteral()
+    {
+        string longString = new('a', 60);
+        string emitted = Emitter.Emit(
+            ParseHelper.Parse($"s = \"{longString}\";").Root,
+            new EmitOptions(Minify: true, MaxLineLength: 20));
+
+        Assert.Contains($"\"{longString}\"", emitted, StringComparison.Ordinal); // over the limit but intact
+    }
+
+    [Fact]
+    public void Wrap_NeverSplitsAnIncludePath()
+    {
+        const string source = "include <a/very/long/library/path/to/lib.scad>";
+        string emitted = Emitter.Emit(ParseHelper.Parse(source).Root, new EmitOptions(Minify: true, MaxLineLength: 10));
+
+        Assert.Contains(source, emitted, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Wrap_LeavesStickyCommentLinesAlone()
+    {
+        // Comment trivia (the aggregated license header, the Customizer fence) is emitted verbatim —
+        // an over-limit comment line is the author's, not the wrapper's.
+        string text = "// " + new string('h', 60);
+        var parsed = (AssignmentStatement)ParseHelper.Parse("x = 1;").Root.Statements[0];
+        AssignmentStatement statement = parsed with
+        {
+            LeadingTrivia = [new CommentTrivia(text, CommentKind.Line) { Span = SourceSpan.Synthetic, Sticky = true }],
+        };
+        var file = new ScadFile(SourceFile.Synthesized, [statement]);
+
+        string emitted = Emitter.Emit(file, new EmitOptions(Minify: true, MaxLineLength: 20));
+
+        Assert.Equal(text, emitted.Split('\n')[0]);
+    }
+
+    [Fact]
+    public void Wrap_PrettyMode_IndentsContinuationLines()
+    {
+        // Opt-in for pretty output: continuation lines sit two levels past the statement's indent, and
+        // the break lands after the operator with its separator space dropped.
+        string emitted = Emitter.Emit(
+            ParseHelper.Parse("x = 1000 + 2000 + 3000;").Root,
+            new EmitOptions(MaxLineLength: 12));
+
+        Assert.Equal("x = 1000 +\n        2000 +\n        3000;\n", emitted);
+    }
+
+    [Fact]
+    public void Wrap_PrettyMode_TabIndent_ContinuesWithTabs()
+    {
+        string emitted = Emitter.Emit(
+            ParseHelper.Parse("x = 1000 + 2000 + 3000;").Root,
+            new EmitOptions(MaxLineLength: 12, IndentStyle: IndentStyle.Tabs));
+
+        Assert.Equal("x = 1000 +\n\t\t2000 +\n\t\t3000;\n", emitted);
+    }
+
+    private static void AssertLinesWithin(string emitted, int limit)
+    {
+        foreach (string line in emitted.Split('\n'))
+        {
+            Assert.True(line.Length <= limit, $"line exceeds {limit} chars: '{line}'");
+        }
     }
 
     // ---------------------------------------------------------------------------------------------

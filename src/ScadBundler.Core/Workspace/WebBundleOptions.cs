@@ -20,10 +20,14 @@ namespace ScadBundler.Core.Workspace;
 /// <param name="ParametersFirst">When <c>true</c>, emit Customizer parameters above the aggregated license
 /// header so they lead the file (<c>--parameters-first</c>); an opt-in Thingiverse-Customizer compatibility
 /// workaround. Default <c>false</c>.</param>
+/// <param name="MaxLineLength">Hard wrap limit in characters (<c>--max-line-length</c>; 0 = no limit).
+/// <c>null</c> (default) = the CLI's profile-dependent default: 256 under a hardening profile, off
+/// otherwise (ADR 0003).</param>
 public sealed record WebBundleOptions(
     bool BundleLicenses = true,
     HardeningProfile Hardening = HardeningProfile.None,
     bool StripLicense = false,
     CollisionStrategy OnCollision = CollisionStrategy.Auto,
     bool PreserveComments = true,
-    bool ParametersFirst = false);
+    bool ParametersFirst = false,
+    int? MaxLineLength = null);
