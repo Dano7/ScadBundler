@@ -60,6 +60,8 @@ public sealed record EmitOptions(
     IndentStyle IndentStyle = IndentStyle.Spaces,
     BraceStyle BraceStyle = BraceStyle.SameLine,
     int MaxLineLength = 100,     // advisory in v1 (no hard wrapping); reserved for future
+                                 // [post-slice note: implemented by ADR 0003 — hard token-boundary
+                                 //  wrapping, default now 0 (off); CLI hardened default 256]
     bool Minify = false,
     bool PreserveComments = true)
 {

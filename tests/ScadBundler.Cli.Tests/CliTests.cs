@@ -267,6 +267,48 @@ public sealed class CliTests
     }
 
     [Fact]
+    public void MaxLineLength_DefaultsTo256UnderMinify_ZeroUnbounded()
+    {
+        // A module body that minifies onto one > 256-char line: the default caps it, and
+        // --max-line-length 0 (maximal minification) removes the cap — same text modulo newlines.
+        string body = string.Concat(
+            Enumerable.Range(1, 12).Select(i => $"translate([0, {i}, 0]) cube([w, 1, {i}]);\n"));
+        using var project = new TempProject(("main.scad", $"module grid(w) {{\n{body}}}\ngrid(4);"));
+
+        int wrappedExit = Run(project, ["bundle", project.Path("main.scad"), "-o", "-", "--minify"], out string wrapped, out _);
+        int unboundedExit = Run(
+            project,
+            ["bundle", project.Path("main.scad"), "-o", "-", "--minify", "--max-line-length", "0"],
+            out string unbounded,
+            out _);
+
+        Assert.Equal(0, wrappedExit);
+        Assert.Equal(0, unboundedExit);
+        Assert.All(wrapped.Split('\n'), line => Assert.True(line.Length <= 256, $"line exceeds 256: '{line}'"));
+        Assert.Contains(unbounded.Split('\n'), line => line.Length > 256); // proves the default actually wrapped
+        Assert.Equal(
+            unbounded.Replace("\n", string.Empty, StringComparison.Ordinal),
+            wrapped.Replace("\n", string.Empty, StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void MaxLineLength_Explicit_WrapsPrettyOutput()
+    {
+        using var project = new TempProject(("main.scad", "x = 1000 + 2000 + 3000;"));
+
+        int exit = Run(
+            project,
+            ["bundle", project.Path("main.scad"), "-o", "-", "--max-line-length", "12"],
+            out string stdout,
+            out _);
+
+        Assert.Equal(0, exit);
+        // The synthesized /* [Hidden] */ fence leads (no Customizer params of its own); the wrapped
+        // statement continues at two indent levels with the operator's separator space dropped.
+        Assert.Equal("/* [Hidden] */\nx = 1000 +\n        2000 +\n        3000;\n", stdout);
+    }
+
+    [Fact]
     public void MinifyAndObfuscate_AreMutuallyExclusive_ExitsTwo()
     {
         using var project = new TempProject(("main.scad", "cube(1);"));
@@ -343,6 +385,9 @@ public sealed class CliTests
         Assert.Equal(2, RunArgs("bundle"));                            // no input
         Assert.Equal(2, RunArgs("bundle", "x.scad", "--bogus"));       // unknown option
         Assert.Equal(2, RunArgs("bundle", "x.scad", "--on-collision", "?")); // bad collision value
+        Assert.Equal(2, RunArgs("bundle", "x.scad", "--max-line-length", "abc")); // non-numeric
+        Assert.Equal(2, RunArgs("bundle", "x.scad", "--max-line-length", "-1"));  // negative
+        Assert.Equal(2, RunArgs("bundle", "x.scad", "--max-line-length"));        // missing value
         Assert.Equal(2, RunArgs("render", "x.scad"));                  // unknown command
     }
 

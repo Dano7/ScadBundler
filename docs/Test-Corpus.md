@@ -486,10 +486,13 @@ For every `slice6-emit` and `slice5-bundle` golden, `emit(parse(expected)) == ex
 
 **T-001-harden — hardening render equivalence** (`integration/T-001-harden/`)
 A root with prologue params (incl. a string), an echo'd string, an included private constant, a namespaced
-`use` library, and an unused (tree-shakeable) module.
+`use` library, an unused (tree-shakeable) module, and long-line content (a data table + a packed module
+body that each minify to > 256 chars, so the default `--max-line-length` wrapping demonstrably fires —
+ADR 0003).
 - **Assertion**: bundling with `--minify` *and* with `--obfuscate` each renders **byte-identical CSG**,
-  emits identical `ECHO:`, and adds no new warnings against the official binary (the Tier-1 proof). Run by
-  `HardeningDifferentialTests`; self-skips without OpenSCAD.
+  emits identical `ECHO:`, and adds no new warnings against the official binary (the Tier-1 proof) — from
+  the exact text the CLI writes (minified + wrapped; `DifferentialAssert` mirrors the CLI's emit-option
+  mapping). Run by `HardeningDifferentialTests`; self-skips without OpenSCAD.
 - Unit-level behaviors (determinism, avalanche, Customizer aliasing, tree-shaking, string decomposition,
   indirection, decoys, semantic no-op) live in `tests/ScadBundler.Core.Tests/Transforming/`.
 

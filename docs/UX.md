@@ -16,6 +16,7 @@ scadbundler bundle <input.scad> [options]
 - `--minify`: **Minimize bundle size** (Slice 7). An AST-level pass — tree-shakes unreferenced definitions, shortens every identifier, canonicalizes number literals — followed by whitespace/comment stripping. Incidentally unreadable. Keeps the aggregated license header (use `--strip-license` to drop it).
 - `--obfuscate`: **Maximize the cost of reverse-engineering** the bundle (Slice 7). Opaque identifiers, reference-transparent indirection, render-inert decoys (uncalled modules + `*`-disabled calls), and decomposed strings (`"ab"`→`str(chr(97),chr(98))`). Output may be *larger* than the input. Mutually exclusive with `--minify` (giving both is a usage error, exit 2). Keeps the license header unless `--strip-license`.
 - `--strip-license`: Drop the aggregated license header under `--minify`/`--obfuscate` (for when you own all the sources). Default is to **keep** it — the downloader of a hardened model still gets the legal text.
+- `--max-line-length <n>`: Hard-wrap emitted lines longer than `n` characters at the nearest safe token boundary (default: **256** under `--minify`/`--obfuscate`, **off** otherwise; `0` = no limit). Some platforms' custom `.scad` parsers read line-by-line into fixed buffers and choke on the very long single lines minification produces; capping them costs ≈1% of the size savings. Newlines are ordinary whitespace to OpenSCAD, so the geometry is untouched — and breaks are never placed inside strings, `include` paths, comments, or a Customizer-annotated parameter line (the annotation must stay on the line its assignment starts on). Pass `--max-line-length 0` to maximally minify. See [ADR 0003](adr/0003-max-line-length-wrapping.md).
 - `--parameters-first`: **Platform-compatibility workaround (opt-in).** Emit the Customizer parameters *above* the aggregated license header so they lead the file, instead of below it. For Thingiverse, whose Customizer fails to surface parameters that follow a long leading comment block (see **Platform compatibility** below). Comment-relocation only — the geometry is unchanged and the license still appears, just below the parameters. A no-op when there is no aggregated header to move (e.g. `--no-bundle-licenses`) or no Customizer parameters. See [ADR 0002](adr/0002-parameters-first-customizer-hoist.md).
 - `--dry-run`: Show what would be done without writing output
 - `--verbose`: Detailed logging of inlined files and transformations
@@ -74,6 +75,9 @@ rationale in [slices/Slice-7-Minify-Obfuscate.md](slices/Slice-7-Minify-Obfuscat
   downloader still gets the legal text); per-section provenance banners and ordinary comments (those not
   driving the Customizer) are dropped. `--strip-license` opts out.
 - **Mutually exclusive.** `--minify --obfuscate` together is a usage error (exit 2).
+- **Lines are capped at 256 characters by default.** Both profiles hard-wrap longer lines at safe token
+  boundaries so line-buffered third-party parsers can read the bundle (≈1% size cost, geometry
+  unchanged, Customizer annotation lines exempt). `--max-line-length` adjusts the cap; `0` removes it.
 
 ## Platform compatibility (Thingiverse): `--parameters-first`
 

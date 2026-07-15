@@ -73,9 +73,13 @@ internal static class BundleCommand
 
         // Emit: minify collapses whitespace + drops non-sticky comments; obfuscate keeps formatting but
         // drops ordinary comments (the aggregated license + Customizer fence are sticky and survive both).
+        // Hardened output synthesizes its long lines, so it defaults to a 256-char hard wrap for the
+        // line-buffered parsers some upload platforms use (ADR 0003); --max-line-length overrides (0 = off).
         var emitOptions = new EmitOptions(
             Minify: hardening == HardeningProfile.Minify,
-            PreserveComments: hardening == HardeningProfile.None && options.PreserveComments);
+            PreserveComments: hardening == HardeningProfile.None && options.PreserveComments,
+            MaxLineLength: options.MaxLineLength
+                ?? (hardening == HardeningProfile.None ? 0 : EmitOptions.DefaultHardenedMaxLineLength));
 
         BundleResult result = Bundler.Bundle(options.Input, bundleOptions, DiskFileSystem.Instance);
         PrintDiagnostics(result.Diagnostics, stderr);
@@ -148,6 +152,8 @@ internal static class BundleCommand
         public bool StripLicense { get; set; }
 
         public bool ParametersFirst { get; set; }
+
+        public int? MaxLineLength { get; set; }
 
         public bool DryRun { get; set; }
 
@@ -227,6 +233,20 @@ internal static class BundleCommand
                     break;
                 case "--parameters-first":
                     options.ParametersFirst = true;
+                    break;
+                case "--max-line-length":
+                    if (!TryValue(args, ref i, arg, out string? length, out error))
+                    {
+                        return false;
+                    }
+
+                    if (!int.TryParse(length, NumberStyles.None, CultureInfo.InvariantCulture, out int maxLineLength))
+                    {
+                        error = $"invalid --max-line-length value '{length}' (expected a non-negative integer; 0 = no limit).";
+                        return false;
+                    }
+
+                    options.MaxLineLength = maxLineLength;
                     break;
                 case "--dry-run":
                     options.DryRun = true;
@@ -446,6 +466,10 @@ internal static class BundleCommand
                                      so they lead the file. Opt-in workaround for Thingiverse's
                                      Customizer, which fails to read parameters that follow a long
                                      leading comment block. Comment-only — the geometry is unchanged
+          --max-line-length <n>      Hard-wrap emitted lines longer than n characters at a safe token
+                                     boundary (geometry unchanged; 0 = no limit). Default: 256 under
+                                     --minify/--obfuscate — some platforms' line-buffered parsers
+                                     choke on longer lines — and 0 (off) otherwise
           --dry-run                  Run the pipeline but write nothing
           --diff                     Print a unified diff of input vs bundled output
           --verbose                  List inlined files, renames, and normalizations
