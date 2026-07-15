@@ -137,7 +137,11 @@ public sealed class Emitter
 
         // The Customizer reads a parameter's annotation off the line its assignment STARTS on
         // (CommentParser.cc getComment(fulltext, firstLine)); a break inside the assignment would strand
-        // the annotation on a later line, so such statements are emitted unbreakable (ADR 0003).
+        // the annotation on a later line, so such statements are emitted unbreakable (ADR 0003). Any
+        // emitted trailing comment protects the line — OpenSCAD feeds whatever same-line comment it
+        // finds to its annotation parser, so "prose" and "annotation" are indistinguishable without
+        // reimplementing that grammar; under the hardened profiles (where wrapping is on by default)
+        // only sticky trivia survives, which is precisely the genuine Customizer annotations.
         bool protectAnnotationLine = level == 0
             && statement is AssignmentStatement
             && HasEmittedTrailingComment(statement);
@@ -775,7 +779,10 @@ public sealed class Emitter
     // Greedy hard wrap: when the current line has grown past MaxLineLength and a safe break point
     // exists on it, break there — the completed line ends at the last safe point, and only a single
     // unbreakable run (e.g. one long string literal) can leave a line over the limit. A separator's
-    // trailing space is dropped at the break so wrapped lines never end in whitespace.
+    // trailing space is dropped at the break so wrapped lines never end in whitespace. The Insert is
+    // not a quadratic hazard: it runs immediately after the append that overflowed, and the break
+    // point is on the current line, so the shifted tail is bounded by one line (≤ MaxLineLength plus
+    // one token) — total wrapping cost stays linear in the output size.
     private void WrapIfNeeded()
     {
         if (_options.MaxLineLength <= 0
