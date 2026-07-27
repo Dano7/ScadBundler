@@ -12,14 +12,14 @@ namespace ScadBundler.Web.Tests;
 /// (bundling takes seconds, set options then Bundle) with a link to the instant command-line tool, and can be
 /// dismissed. App gates it on <c>IsLargeProject</c>; the component itself just shows the note until dismissed.
 /// </summary>
-public sealed class LargeProjectNoticeTests : TestContext
+public sealed class LargeProjectNoticeTests : BunitContext
 {
     [Fact]
     public void ShowsExpectationNote_WithCliLink()
     {
         Services.AddSingleton(new WorkspaceController());
 
-        IRenderedComponent<LargeProjectNotice> cut = RenderComponent<LargeProjectNotice>();
+        IRenderedComponent<LargeProjectNotice> cut = Render<LargeProjectNotice>();
 
         Assert.Contains("Large project", cut.Markup);
         Assert.Contains("Bundle", cut.Markup);                       // explains the deferred manual bundle
@@ -32,7 +32,7 @@ public sealed class LargeProjectNoticeTests : TestContext
     public void Dismiss_RemovesTheNotice()
     {
         Services.AddSingleton(new WorkspaceController());
-        IRenderedComponent<LargeProjectNotice> cut = RenderComponent<LargeProjectNotice>();
+        IRenderedComponent<LargeProjectNotice> cut = Render<LargeProjectNotice>();
         Assert.NotEmpty(cut.FindAll(".large-notice"));
 
         cut.Find(".large-notice-dismiss").Click();

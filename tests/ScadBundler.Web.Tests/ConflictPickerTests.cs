@@ -12,7 +12,7 @@ namespace ScadBundler.Web.Tests;
 /// ambiguity so the bundle appears. The ambiguity is produced by the real <see cref="ProjectAnalyzer"/>.
 /// The recompute is async since Slice W5 §C1, so the helper awaits it and resolve clicks await before asserting.
 /// </summary>
-public sealed class ConflictPickerTests : TestContext
+public sealed class ConflictPickerTests : BunitContext
 {
     // main.scad needs <utils.scad>; two uploads carry that basename at different sub-paths ⇒ Ambiguous.
     private async Task<(WorkspaceController Controller, AmbiguousReference Ref)> AmbiguousAsync()
@@ -36,7 +36,7 @@ public sealed class ConflictPickerTests : TestContext
     {
         (_, AmbiguousReference ambiguous) = await AmbiguousAsync();
 
-        IRenderedComponent<ConflictPicker> cut = RenderComponent<ConflictPicker>(p =>
+        IRenderedComponent<ConflictPicker> cut = Render<ConflictPicker>(p =>
             p.Add(c => c.Ambiguous, ambiguous));
 
         Assert.Contains("utils.scad", cut.Markup);
@@ -49,7 +49,7 @@ public sealed class ConflictPickerTests : TestContext
     public async Task UseThisFile_ResolvesAndBundles()
     {
         (WorkspaceController controller, AmbiguousReference ambiguous) = await AmbiguousAsync();
-        IRenderedComponent<ConflictPicker> cut = RenderComponent<ConflictPicker>(p =>
+        IRenderedComponent<ConflictPicker> cut = Render<ConflictPicker>(p =>
             p.Add(c => c.Ambiguous, ambiguous));
 
         cut.FindAll("button")[0].Click();             // "Use this file" — default selection = first candidate
@@ -64,7 +64,7 @@ public sealed class ConflictPickerTests : TestContext
     public async Task InlinePathField_PlacesSelectedCandidate()
     {
         (WorkspaceController controller, AmbiguousReference ambiguous) = await AmbiguousAsync();
-        IRenderedComponent<ConflictPicker> cut = RenderComponent<ConflictPicker>(p =>
+        IRenderedComponent<ConflictPicker> cut = Render<ConflictPicker>(p =>
             p.Add(c => c.Ambiguous, ambiguous));
 
         cut.FindAll("input[type=radio]")[1].Change("on");          // select the second candidate (b = 2)

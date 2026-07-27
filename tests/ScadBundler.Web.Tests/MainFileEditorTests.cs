@@ -11,7 +11,7 @@ namespace ScadBundler.Web.Tests;
 /// project (debounced), and the textarea reloads when the root <i>file</i> changes (promote/replace) without
 /// clobbering in-progress typing.
 /// </summary>
-public sealed class MainFileEditorTests : TestContext
+public sealed class MainFileEditorTests : BunitContext
 {
     [Fact]
     public async Task EditingTextarea_ReanalyzesAfterDebounce()
@@ -29,7 +29,7 @@ public sealed class MainFileEditorTests : TestContext
             }
         };
 
-        IRenderedComponent<MainFileEditor> cut = RenderComponent<MainFileEditor>(p => p
+        IRenderedComponent<MainFileEditor> cut = Render<MainFileEditor>(p => p
             .Add(c => c.Root, controller.Root)
             .Add(c => c.RootText, controller.RootText)
             .Add(c => c.DebounceMs, 1));
@@ -48,12 +48,12 @@ public sealed class MainFileEditorTests : TestContext
         var controller = new WorkspaceController();
         Services.AddSingleton(controller);
 
-        IRenderedComponent<MainFileEditor> cut = RenderComponent<MainFileEditor>(p => p
+        IRenderedComponent<MainFileEditor> cut = Render<MainFileEditor>(p => p
             .Add(c => c.Root, "/proj/a.scad")
             .Add(c => c.RootText, "// file A\n"));
         Assert.Contains("// file A", cut.Markup);
 
-        cut.SetParametersAndRender(p => p
+        cut.Render(p => p
             .Add(c => c.Root, "/proj/b.scad")
             .Add(c => c.RootText, "// file B\n"));
 

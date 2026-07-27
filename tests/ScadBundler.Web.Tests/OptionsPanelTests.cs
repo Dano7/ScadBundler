@@ -17,7 +17,7 @@ namespace ScadBundler.Web.Tests;
 /// The option value is set synchronously by <c>SetOptions</c>; the re-bundle is async (Slice W5 §C1), so
 /// tests that assert the re-bundled output <c>await</c> <see cref="WorkspaceController.Recomputing"/>.
 /// </summary>
-public sealed class OptionsPanelTests : TestContext
+public sealed class OptionsPanelTests : BunitContext
 {
     // Generous window for WaitForAssertion (used by the back-to-back-change tests): this suite can run beside
     // the CPU-heavy integration suite (the W2 MainFileEditor timing note).
@@ -46,7 +46,7 @@ public sealed class OptionsPanelTests : TestContext
         ]);
         await controller.Recomputing;
         Services.AddSingleton(controller);
-        IRenderedComponent<OptionsPanel> cut = RenderComponent<OptionsPanel>();
+        IRenderedComponent<OptionsPanel> cut = Render<OptionsPanel>();
         return (controller, cut);
     }
 
@@ -188,7 +188,7 @@ public sealed class OptionsPanelTests : TestContext
         controller.AddOrReplace([new UploadedFile("main.scad", big)]);
         await controller.Recomputing;
         Services.AddSingleton(controller);
-        return (controller, RenderComponent<OptionsPanel>());
+        return (controller, Render<OptionsPanel>());
     }
 
     [Fact]
@@ -232,7 +232,7 @@ public sealed class OptionsPanelTests : TestContext
         controller.AddOrReplace([new UploadedFile("main.scad", big)]);
         await controller.Recomputing;
         Services.AddSingleton(controller);
-        IRenderedComponent<OptionsPanel> cut = RenderComponent<OptionsPanel>();
+        IRenderedComponent<OptionsPanel> cut = Render<OptionsPanel>();
 
         Assert.False(controller.CanBundle);
         Assert.True(cut.Find(".opt-apply-btn").HasAttribute("disabled"));     // nothing to bundle yet
