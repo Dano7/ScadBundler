@@ -9,7 +9,7 @@ namespace ScadBundler.Web.Tests;
 /// <c>file : line : col</c> + message + a friendly per-code line, and <b>SB4001 never appears</b> (it is the
 /// file list's ⚠ rows, not a "problem").
 /// </summary>
-public sealed class ProblemsPanelTests : TestContext
+public sealed class ProblemsPanelTests : BunitContext
 {
     [Fact]
     public void RendersLocation_Message_AndFriendlyLine()
@@ -19,7 +19,7 @@ public sealed class ProblemsPanelTests : TestContext
             new("SB3004", "Warning", "module 'widget' is defined more than once", "/proj/lib.scad", 3, 5),
         ];
 
-        IRenderedComponent<ProblemsPanel> cut = RenderComponent<ProblemsPanel>(p =>
+        IRenderedComponent<ProblemsPanel> cut = Render<ProblemsPanel>(p =>
             p.Add(c => c.Diagnostics, diagnostics));
 
         Assert.Contains("lib.scad : 3 : 5", cut.Markup);
@@ -36,7 +36,7 @@ public sealed class ProblemsPanelTests : TestContext
             new("SB3003", "Warning", "variable 'x' reassigned", "/proj/main.scad", 2, 1),
         ];
 
-        IRenderedComponent<ProblemsPanel> cut = RenderComponent<ProblemsPanel>(p =>
+        IRenderedComponent<ProblemsPanel> cut = Render<ProblemsPanel>(p =>
             p.Add(c => c.Diagnostics, diagnostics));
 
         Assert.DoesNotContain("MISSING_FILE_SENTINEL", cut.Markup);
@@ -46,11 +46,11 @@ public sealed class ProblemsPanelTests : TestContext
     [Fact]
     public void RendersNothing_WhenNoDiagnostics()
     {
-        IRenderedComponent<ProblemsPanel> empty = RenderComponent<ProblemsPanel>(p =>
+        IRenderedComponent<ProblemsPanel> empty = Render<ProblemsPanel>(p =>
             p.Add(c => c.Diagnostics, []));
         Assert.Empty(empty.Markup.Trim());
 
-        IRenderedComponent<ProblemsPanel> nul = RenderComponent<ProblemsPanel>();
+        IRenderedComponent<ProblemsPanel> nul = Render<ProblemsPanel>();
         Assert.Empty(nul.Markup.Trim());
     }
 }

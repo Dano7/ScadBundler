@@ -8,7 +8,7 @@ namespace ScadBundler.Web.Tests;
 /// bUnit smoke tests for the read-only <see cref="StructureTree"/> (Slice W2 §2.6): it shows the resolved
 /// folder layout (folders → files) and is display-only — there are no inputs, buttons, or editable controls.
 /// </summary>
-public sealed class StructureTreeTests : TestContext
+public sealed class StructureTreeTests : BunitContext
 {
     [Fact]
     public void RendersFoldersAndFiles_ReadOnly()
@@ -19,7 +19,7 @@ public sealed class StructureTreeTests : TestContext
             new("BOSL2/std.scad", "// std\n"),
         ];
 
-        IRenderedComponent<StructureTree> cut = RenderComponent<StructureTree>(p =>
+        IRenderedComponent<StructureTree> cut = Render<StructureTree>(p =>
             p.Add(c => c.Uploads, uploads));
 
         Assert.Contains("main.scad", cut.Markup);
@@ -32,7 +32,7 @@ public sealed class StructureTreeTests : TestContext
     [Fact]
     public void RendersNothing_WhenNoUploads()
     {
-        IRenderedComponent<StructureTree> cut = RenderComponent<StructureTree>();
+        IRenderedComponent<StructureTree> cut = Render<StructureTree>();
 
         Assert.Empty(cut.Markup.Trim());
     }

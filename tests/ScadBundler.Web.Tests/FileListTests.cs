@@ -14,7 +14,7 @@ namespace ScadBundler.Web.Tests;
 /// The recompute is async since Slice W5 §C1, so the helper awaits it before rendering and clicks await it
 /// before asserting controller state.
 /// </summary>
-public sealed class FileListTests : TestContext
+public sealed class FileListTests : BunitContext
 {
     private async Task<(WorkspaceController Controller, IRenderedComponent<FileList> Cut)> RenderForAsync(
         params UploadedFile[] uploads)
@@ -24,7 +24,7 @@ public sealed class FileListTests : TestContext
         controller.AddOrReplace(uploads);
         await controller.Recomputing;
         Services.AddSingleton(controller);
-        IRenderedComponent<FileList> cut = RenderComponent<FileList>(p => p
+        IRenderedComponent<FileList> cut = Render<FileList>(p => p
             .Add(c => c.Analysis, controller.Analysis)
             .Add(c => c.Uploads, controller.Uploads));
         return (controller, cut);
@@ -102,7 +102,7 @@ public sealed class FileListTests : TestContext
     public void RendersNothing_WhenAnalysisNull()
     {
         Services.AddSingleton(new WorkspaceController());
-        IRenderedComponent<FileList> cut = RenderComponent<FileList>();
+        IRenderedComponent<FileList> cut = Render<FileList>();
 
         Assert.Empty(cut.Markup.Trim());
     }

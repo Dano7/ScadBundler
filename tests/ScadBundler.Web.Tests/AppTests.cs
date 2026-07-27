@@ -13,7 +13,7 @@ namespace ScadBundler.Web.Tests;
 /// (a literal instead of an expression) slips past them. Regression for the <c>RootText="Controller.RootText"</c>
 /// bug, which showed the binding text in the editor and produced a wrong download name.
 /// </summary>
-public sealed class AppTests : TestContext
+public sealed class AppTests : BunitContext
 {
     [Fact]
     public async Task MainFileEditor_AndDownloadName_BindToValues_NotLiteralExpressions()
@@ -24,7 +24,7 @@ public sealed class AppTests : TestContext
         await controller.Recomputing;
         Services.AddSingleton(controller);
 
-        IRenderedComponent<App> cut = RenderComponent<App>();
+        IRenderedComponent<App> cut = Render<App>();
 
         // The editor textarea shows the actual root-file contents (whether rendered as the value attribute
         // or inner text), never the literal "Controller.RootText".

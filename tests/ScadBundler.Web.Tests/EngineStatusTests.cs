@@ -13,14 +13,14 @@ namespace ScadBundler.Web.Tests;
 /// a determinate <c>&lt;progress&gt;</c> bar via its <c>role="status"</c> live region. The recompute is held
 /// mid-phase (<see cref="WorkspaceController.PhaseHoldMs"/>) so the transient busy state is observable.
 /// </summary>
-public sealed class EngineStatusTests : TestContext
+public sealed class EngineStatusTests : BunitContext
 {
     [Fact]
     public void Idle_ShowsEngineReady_AsAStatusRegion_WithNoProgressBar()
     {
         Services.AddSingleton(new WorkspaceController());
 
-        IRenderedComponent<EngineStatus> cut = RenderComponent<EngineStatus>();
+        IRenderedComponent<EngineStatus> cut = Render<EngineStatus>();
 
         IElement status = cut.Find(".engine-status");
         Assert.Equal("status", status.GetAttribute("role"));     // a polite live region for assistive tech
@@ -35,7 +35,7 @@ public sealed class EngineStatusTests : TestContext
         // Hold each phase so the transient "Analyzing…" state is reliably observable by WaitForAssertion.
         var controller = new WorkspaceController { DebounceMs = 0, PhaseHoldMs = 200 };
         Services.AddSingleton(controller);
-        IRenderedComponent<EngineStatus> cut = RenderComponent<EngineStatus>();
+        IRenderedComponent<EngineStatus> cut = Render<EngineStatus>();
         Assert.Contains("Engine ready", cut.Markup);
 
         controller.AddOrReplace(
