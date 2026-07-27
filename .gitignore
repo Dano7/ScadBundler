@@ -45,3 +45,5 @@ artifacts/
 ## OS files
 .DS_Store
 Thumbs.db
+.claude/launch.json
+SETUP-CHECKLIST.md
